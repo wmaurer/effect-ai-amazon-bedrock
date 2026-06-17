@@ -149,6 +149,17 @@ describe("AmazonBedrockLanguageModel", () => {
     const globToolkit = Toolkit.make(GlobTool)
     const globToolkitLayer = globToolkit.toLayer({ GlobTool: () => Effect.succeed("found.ts") })
 
+    const GrepTool = Tool.make("GrepTool", {
+      description: "Search file contents",
+      parameters: Schema.Struct({ query: Schema.String }),
+      success: Schema.String
+    })
+    const twoToolkit = Toolkit.make(GlobTool, GrepTool)
+    const twoToolkitLayer = twoToolkit.toLayer({
+      GlobTool: () => Effect.succeed("found.ts"),
+      GrepTool: () => Effect.succeed("match")
+    })
+
     it.effect("encodes user tools into toolConfig.tools", () =>
       Effect.gen(function*() {
         let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
@@ -311,6 +322,46 @@ describe("AmazonBedrockLanguageModel", () => {
           content: [{ text: JSON.stringify("a.ts\nb.ts") }]
         })
       }))
+
+    it.effect("omits toolConfig when toolChoice is 'none'", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(toolResponse(request, [{ text: "ok" }]))
+        }
+
+        yield* LanguageModel.generateText({ prompt: "x", toolkit: globToolkit, toolChoice: "none" }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(globToolkitLayer)
+        )
+
+        const body = yield* getRequestBody(captured!)
+        assert.isUndefined(body.toolConfig)
+      }))
+
+    it.effect("filters tools to the oneOf set and defaults to auto", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(toolResponse(request, [{ text: "ok" }]))
+        }
+
+        yield* LanguageModel.generateText({
+          prompt: "x",
+          toolkit: twoToolkit,
+          toolChoice: { oneOf: ["GlobTool"] }
+        }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(twoToolkitLayer)
+        )
+
+        const body = yield* getRequestBody(captured!)
+        assert.strictEqual(body.toolConfig.tools.length, 1)
+        assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "GlobTool")
+        assert.isDefined(body.toolConfig.toolChoice.auto)
+      }))
   })
 
   describe("generateObject", () => {
@@ -450,6 +501,34 @@ describe("AmazonBedrockLanguageModel", () => {
         const errorPart = parts.find((part) => part.type === "error")
         assert.isDefined(errorPart)
         assert.include(JSON.stringify(errorPart), "Slow down")
+      }))
+
+    it.effect("fails loudly when streaming with tools", () =>
+      Effect.gen(function*() {
+        const StreamGlobTool = Tool.make("GlobTool", {
+          description: "Search for files",
+          parameters: Schema.Struct({ pattern: Schema.String }),
+          success: Schema.String
+        })
+        const streamGlobToolkit = Toolkit.make(StreamGlobTool)
+        const streamGlobToolkitLayer = streamGlobToolkit.toLayer({ GlobTool: () => Effect.succeed("found.ts") })
+
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(jsonResponse(request, {
+            output: { message: { role: "assistant", content: [{ text: "ok" }] } },
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            stopReason: "end_turn"
+          }))
+
+        const error = yield* LanguageModel.streamText({ prompt: "x", toolkit: streamGlobToolkit }).pipe(
+          Stream.runDrain,
+          Effect.provide(layersFor(handler)),
+          Effect.provide(streamGlobToolkitLayer),
+          Effect.flip
+        )
+
+        assert.strictEqual(error._tag, "AiError")
+        assert.include(JSON.stringify(error), "not supported")
       }))
   })
 })

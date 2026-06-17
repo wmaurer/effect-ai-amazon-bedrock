@@ -422,6 +422,9 @@ const prepareTools: (
     toolChoice = choice.mode === "required" ? { any: {} } : { auto: {} }
   }
 
+  // Bedrock's Converse API rejects an empty `tools` array alongside a
+  // `toolChoice`, so when tool selection filters everything out (e.g. an
+  // `oneOf` that matches no tools) we omit `toolConfig` entirely.
   const toolConfig: typeof ToolConfiguration.Encoded | undefined = tools.length > 0
     ? { tools, ...(Predicate.isNotUndefined(toolChoice) ? { toolChoice } : undefined) }
     : undefined
