@@ -1,14 +1,14 @@
 /**
- * The `AmazonBedrockSchema` module defines the minimal, text-only subset of the
- * Amazon Bedrock Converse API request, response, and streaming event schemas
- * used by this provider.
+ * The `AmazonBedrockSchema` module defines the text and tool-calling subset of
+ * the Amazon Bedrock Converse API request, response, and streaming event
+ * schemas used by this provider.
  *
  * **Scope**
  *
- * This is intentionally limited to text-in / streaming-text-out. Tool use,
- * images, documents, reasoning, and structured output are not modelled here
- * yet, but the content block and delta unions tolerate (and ignore) non-text
- * members so decoding never fails on them.
+ * This models text and tool use (tool-use / tool-result content blocks and tool
+ * configuration). Images, documents, and reasoning are not modelled here yet,
+ * but the content block and delta unions tolerate (and ignore) non-text members
+ * so decoding never fails on them.
  *
  * @since 4.0.0
  */
@@ -71,6 +71,30 @@ export class TokenUsage extends Schema.Class<TokenUsage>(makeIdentifier("TokenUs
 // =============================================================================
 
 /**
+ * A tool-use content block: the model's request to invoke a tool.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class ToolUseBlock extends Schema.Class<ToolUseBlock>(makeIdentifier("ToolUseBlock"))({
+  toolUseId: Schema.String,
+  name: Schema.String,
+  input: Schema.Unknown
+}) {}
+
+/**
+ * A tool-result content block: the outcome of a tool invocation fed back to the
+ * model. Content is text-only in this provider.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class ToolResultBlock extends Schema.Class<ToolResultBlock>(makeIdentifier("ToolResultBlock"))({
+  toolUseId: Schema.String,
+  content: Schema.Array(Schema.Struct({ text: Schema.String }))
+}) {}
+
+/**
  * A text content block within a Converse message.
  *
  * **Details**
@@ -86,7 +110,9 @@ export class TokenUsage extends Schema.Class<TokenUsage>(makeIdentifier("TokenUs
  */
 export const ContentBlock = Schema.Struct({
   type: Schema.tagDefaultOmit("text"),
-  text: Schema.optional(Schema.String)
+  text: Schema.optional(Schema.String),
+  toolUse: Schema.optional(ToolUseBlock),
+  toolResult: Schema.optional(ToolResultBlock)
 })
 
 /**
@@ -126,6 +152,62 @@ export class InferenceConfiguration extends Schema.Class<InferenceConfiguration>
 }) {}
 
 /**
+ * The JSON Schema specification of a tool the model may call.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class ToolSpecification extends Schema.Class<ToolSpecification>(makeIdentifier("ToolSpecification"))({
+  name: Schema.String,
+  description: Schema.optionalKey(Schema.String),
+  inputSchema: Schema.Struct({
+    json: Schema.Record(Schema.String, Schema.Unknown)
+  })
+}) {}
+
+/**
+ * A tool entry within a {@link ToolConfiguration}.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class Tool extends Schema.Class<Tool>(makeIdentifier("Tool"))({
+  toolSpec: ToolSpecification
+}) {}
+
+/**
+ * Controls how the model selects a tool: let it decide (`auto`), force any tool
+ * (`any`), or force a specific tool (`tool`).
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const ToolChoice = Schema.Union([
+  Schema.Struct({ auto: Schema.Struct({}) }),
+  Schema.Struct({ any: Schema.Struct({}) }),
+  Schema.Struct({ tool: Schema.Struct({ name: Schema.String }) })
+])
+
+/**
+ * The type of {@link ToolChoice}.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export type ToolChoice = typeof ToolChoice.Type
+
+/**
+ * The tool configuration for a Converse request.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class ToolConfiguration extends Schema.Class<ToolConfiguration>(makeIdentifier("ToolConfiguration"))({
+  tools: Schema.Array(Tool),
+  toolChoice: Schema.optionalKey(ToolChoice)
+}) {}
+
+/**
  * The request payload for the Converse and ConverseStream operations.
  *
  * @category schemas
@@ -135,6 +217,7 @@ export class ConverseRequest extends Schema.Class<ConverseRequest>(makeIdentifie
   modelId: Schema.String,
   messages: Schema.Array(Message),
   system: Schema.optional(Schema.Array(SystemContentBlock)),
+  toolConfig: Schema.optionalKey(ToolConfiguration),
   inferenceConfig: Schema.optional(InferenceConfiguration)
 }) {}
 
