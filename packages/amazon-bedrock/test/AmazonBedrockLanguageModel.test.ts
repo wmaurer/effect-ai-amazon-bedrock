@@ -345,6 +345,42 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(body.toolConfig.toolChoice.tool.name, "person")
         assert.strictEqual(body.toolConfig.tools[0].toolSpec.inputSchema.json.type, "object")
       }))
+
+    it.effect("renders union and nullable fields in the forced tool schema", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(jsonResponse(request, {
+            output: {
+              message: {
+                role: "assistant",
+                content: [{ toolUse: { toolUseId: "tu_1", name: "finding", input: { line: 12, owner: null } } }]
+              }
+            },
+            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            stopReason: "tool_use"
+          }))
+        }
+
+        yield* LanguageModel.generateObject({
+          prompt: "describe a finding",
+          objectName: "finding",
+          schema: Schema.Struct({
+            line: Schema.Union([Schema.Int, Schema.String]),
+            owner: Schema.NullOr(Schema.Int)
+          })
+        }).pipe(Effect.provide(layersFor(handler)), Effect.ignore)
+
+        const body = yield* getRequestBody(captured!)
+        const props = body.toolConfig.tools[0].toolSpec.inputSchema.json.properties
+        // The exact JSON-Schema encoding is whatever `toCodecAnthropic` produces;
+        // assert the union/nullable members survive in some accepted form.
+        assert.include(JSON.stringify(props.line), "integer")
+        assert.include(JSON.stringify(props.line), "string")
+        assert.include(JSON.stringify(props.owner), "integer")
+        assert.include(JSON.stringify(props.owner), "null")
+      }))
   })
 
   describe("streamText", () => {
