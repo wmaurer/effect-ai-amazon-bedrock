@@ -134,27 +134,109 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(response.text, "Answer")
       }))
 
-    it.effect("fails loud when tools are requested", () =>
-      Effect.gen(function*() {
-        const handler = (request: HttpClientRequest.HttpClientRequest) => Effect.succeed(jsonResponse(request, {}))
-        const GlobTool = Tool.make("GlobTool", {
-          description: "Search for files",
-          parameters: Schema.Struct({ pattern: Schema.String }),
-          success: Schema.String
-        })
-        const toolkit = Toolkit.make(GlobTool)
-        const toolkitLayer = toolkit.toLayer({
-          GlobTool: () => Effect.succeed("found.ts")
-        })
+    const toolResponse = (request: HttpClientRequest.HttpClientRequest, content: ReadonlyArray<unknown>) =>
+      jsonResponse(request, {
+        output: { message: { role: "assistant", content } },
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        stopReason: "end_turn"
+      })
 
-        const error = yield* Effect.flip(
-          LanguageModel.generateText({ prompt: "find ts files", toolkit }).pipe(
-            Effect.provide(layersFor(handler)),
-            Effect.provide(toolkitLayer)
-          )
+    const GlobTool = Tool.make("GlobTool", {
+      description: "Search for files",
+      parameters: Schema.Struct({ pattern: Schema.String }),
+      success: Schema.String
+    })
+    const globToolkit = Toolkit.make(GlobTool)
+    const globToolkitLayer = globToolkit.toLayer({ GlobTool: () => Effect.succeed("found.ts") })
+
+    it.effect("encodes user tools into toolConfig.tools", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(toolResponse(request, [{ text: "ok" }]))
+        }
+
+        yield* LanguageModel.generateText({ prompt: "find ts files", toolkit: globToolkit }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(globToolkitLayer)
         )
-        assert.strictEqual(error.reason._tag, "InvalidUserInputError")
-        assert.include(error.message, "Tool calling is not supported")
+
+        const body = yield* getRequestBody(captured!)
+        assert.strictEqual(body.toolConfig.tools.length, 1)
+        assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "GlobTool")
+        assert.strictEqual(body.toolConfig.tools[0].toolSpec.description, "Search for files")
+        assert.strictEqual(body.toolConfig.tools[0].toolSpec.inputSchema.json.type, "object")
+        assert.isDefined(body.toolConfig.tools[0].toolSpec.inputSchema.json.properties.pattern)
+        assert.isDefined(body.toolConfig.toolChoice.auto)
+      }))
+
+    it.effect("maps toolChoice 'required' to { any: {} }", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(toolResponse(request, [{ text: "ok" }]))
+        }
+
+        yield* LanguageModel.generateText({ prompt: "x", toolkit: globToolkit, toolChoice: "required" }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(globToolkitLayer)
+        )
+
+        const body = yield* getRequestBody(captured!)
+        assert.isDefined(body.toolConfig.toolChoice.any)
+      }))
+
+    it.effect("maps a named toolChoice to { tool: { name } }", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(toolResponse(request, [{ text: "ok" }]))
+        }
+
+        yield* LanguageModel.generateText({ prompt: "x", toolkit: globToolkit, toolChoice: { tool: "GlobTool" } }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(globToolkitLayer)
+        )
+
+        const body = yield* getRequestBody(captured!)
+        assert.strictEqual(body.toolConfig.toolChoice.tool.name, "GlobTool")
+      }))
+
+    it.effect("decodes a toolUse response into a tool-call part", () =>
+      Effect.gen(function*() {
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(jsonResponse(request, {
+            output: {
+              message: {
+                role: "assistant",
+                content: [{ toolUse: { toolUseId: "tu_1", name: "GlobTool", input: { pattern: "*.ts" } } }]
+              }
+            },
+            usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 },
+            stopReason: "tool_use"
+          }))
+
+        const response = yield* LanguageModel.generateText({
+          prompt: "find ts files",
+          toolkit: globToolkit,
+          // Do not auto-resolve the tool call; we want to inspect the tool-call part.
+          disableToolCallResolution: true
+        }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(globToolkitLayer)
+        )
+
+        assert.strictEqual(response.finishReason, "tool-calls")
+        const toolCall = response.content.find((part) => part.type === "tool-call")
+        assert.isDefined(toolCall)
+        if (toolCall?.type === "tool-call") {
+          assert.strictEqual(toolCall.id, "tu_1")
+          assert.strictEqual(toolCall.name, "GlobTool")
+          assert.deepStrictEqual(toolCall.params, { pattern: "*.ts" })
+        }
       }))
 
     it.effect("maps 429 to a RateLimitError", () =>

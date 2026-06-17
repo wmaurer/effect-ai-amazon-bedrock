@@ -17,14 +17,18 @@ import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
+import type * as Schema from "effect/Schema"
+import * as SchemaAST from "effect/SchemaAST"
 import * as Stream from "effect/Stream"
 import type { Mutable, Simplify } from "effect/Types"
 import * as AiError from "effect/unstable/ai/AiError"
+import { toCodecAnthropic } from "effect/unstable/ai/AnthropicStructuredOutput"
 import type * as IdGenerator from "effect/unstable/ai/IdGenerator"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import * as AiModel from "effect/unstable/ai/Model"
 import type * as Prompt from "effect/unstable/ai/Prompt"
 import type * as Response from "effect/unstable/ai/Response"
+import * as Tool from "effect/unstable/ai/Tool"
 import { AmazonBedrockClient } from "./AmazonBedrockClient.ts"
 import type {
   ContentBlock,
@@ -32,7 +36,9 @@ import type {
   ConverseResponse,
   ConverseResponseStreamEvent,
   Message,
-  SystemContentBlock
+  SystemContentBlock,
+  ToolChoice,
+  ToolConfiguration
 } from "./AmazonBedrockSchema.ts"
 import * as InternalUtilities from "./internal/utilities.ts"
 
@@ -100,49 +106,63 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
   const makeRequest = Effect.fnUntraced(
     function*(
       options: LanguageModel.ProviderOptions
-    ): Effect.fn.Return<typeof ConverseRequest.Encoded, AiError.AiError> {
-      // Fail loud on capabilities this text-only provider does not support
-      // yet, rather than silently dropping them from the request.
-      if (options.tools.length > 0) {
-        return yield* AiError.make({
-          module: "AmazonBedrockLanguageModel",
-          method: "makeRequest",
-          reason: new AiError.InvalidUserInputError({
-            description: "Tool calling is not supported by this text-only provider"
-          })
-        })
-      }
-      if (options.responseFormat.type !== "text") {
-        return yield* AiError.make({
-          module: "AmazonBedrockLanguageModel",
-          method: "makeRequest",
-          reason: new AiError.InvalidUserInputError({
-            description: "Structured output is not supported by this text-only provider"
-          })
-        })
-      }
+    ): Effect.fn.Return<{
+      readonly request: typeof ConverseRequest.Encoded
+      readonly nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>
+    }, AiError.AiError> {
       const services = yield* Effect.context<never>()
       const config = { modelId: model, ...providerConfig, ...services.mapUnsafe.get(Config.key) }
       const { messages, system } = yield* prepareMessages(options)
+      const { nameMapper, toolConfig } = yield* prepareTools(options)
+      const responseFormat = options.responseFormat
+
+      let jsonToolConfig: typeof ToolConfiguration.Encoded | undefined = undefined
+      if (responseFormat.type === "json") {
+        const json = yield* tryJsonSchema(responseFormat.schema, "makeRequest")
+        jsonToolConfig = {
+          tools: [{
+            toolSpec: {
+              name: responseFormat.objectName,
+              description: SchemaAST.resolveDescription(responseFormat.schema.ast) ?? "Respond with a JSON object",
+              inputSchema: { json: json as Record<string, unknown> }
+            }
+          }],
+          toolChoice: { tool: { name: responseFormat.objectName } }
+        }
+      }
 
       const request: typeof ConverseRequest.Encoded = {
         ...config,
         modelId: config.modelId!,
         system,
-        messages
+        messages,
+        ...(Predicate.isNotUndefined(jsonToolConfig)
+          ? { toolConfig: jsonToolConfig }
+          : Predicate.isNotUndefined(toolConfig)
+          ? { toolConfig }
+          : {})
       }
-      return request
+      return { request, nameMapper }
     }
   )
 
   return yield* LanguageModel.make({
     generateText: Effect.fnUntraced(function*(options) {
-      const request = yield* makeRequest(options)
+      const { nameMapper, request } = yield* makeRequest(options)
       const rawResponse = yield* client.converse({ payload: request })
-      return yield* makeResponse(request, rawResponse)
+      return yield* makeResponse(request, rawResponse, options, nameMapper)
     }),
     streamText: Effect.fnUntraced(function*(options) {
-      const request = yield* makeRequest(options)
+      if (options.tools.length > 0 || options.responseFormat.type !== "text") {
+        return yield* AiError.make({
+          module: "AmazonBedrockLanguageModel",
+          method: "streamText",
+          reason: new AiError.InvalidUserInputError({
+            description: "Streaming tool calls and structured output are not supported yet; use generateText"
+          })
+        })
+      }
+      const request = (yield* makeRequest(options)).request
       const stream = client.converseStream({ payload: request })
       return yield* makeStreamResponse(request, stream)
     }, (effect, _options) => effect.pipe(Stream.unwrap))
@@ -297,17 +317,106 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
 )
 
 // =============================================================================
+// Schema Helpers
+// =============================================================================
+
+const unsupportedSchemaError = (error: unknown, method: string): AiError.AiError =>
+  AiError.make({
+    module: "AmazonBedrockLanguageModel",
+    method,
+    reason: new AiError.UnsupportedSchemaError({
+      description: error instanceof Error ? error.message : String(error)
+    })
+  })
+
+const tryToolJsonSchema = (tool: Tool.Any, method: string) =>
+  Effect.try({
+    try: () => Tool.getJsonSchema(tool, { transformer: toCodecAnthropic }),
+    catch: (error) => unsupportedSchemaError(error, method)
+  })
+
+const tryJsonSchema = (schema: Schema.Top, method: string) =>
+  Effect.try({
+    try: () => Tool.getJsonSchemaFromSchema(schema, { transformer: toCodecAnthropic }),
+    catch: (error) => unsupportedSchemaError(error, method)
+  })
+
+// =============================================================================
+// Tool Conversion
+// =============================================================================
+
+const prepareTools: (
+  options: LanguageModel.ProviderOptions
+) => Effect.Effect<{
+  readonly toolConfig: typeof ToolConfiguration.Encoded | undefined
+  readonly nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>
+}, AiError.AiError> = Effect.fnUntraced(function*(options) {
+  const nameMapper = new Tool.NameMapper(options.tools)
+
+  if (options.tools.length === 0 || options.toolChoice === "none") {
+    return { toolConfig: undefined, nameMapper }
+  }
+
+  const tools: Array<(typeof ToolConfiguration.Encoded)["tools"][number]> = []
+  for (const tool of options.tools) {
+    if (!Tool.isUserDefined(tool)) {
+      const toolName = (tool as { name: string }).name
+      return yield* AiError.make({
+        module: "AmazonBedrockLanguageModel",
+        method: "prepareTools",
+        reason: new AiError.InvalidUserInputError({
+          description: `Unsupported tool '${toolName}' - this provider supports user-defined tools only`
+        })
+      })
+    }
+    const description = Tool.getDescription(tool)
+    const json = yield* tryToolJsonSchema(tool, "prepareTools")
+    tools.push({
+      toolSpec: {
+        name: tool.name,
+        ...(Predicate.isNotUndefined(description) ? { description } : undefined),
+        inputSchema: { json: json as Record<string, unknown> }
+      }
+    })
+  }
+
+  let toolChoice: typeof ToolChoice.Encoded | undefined = undefined
+  const choice = options.toolChoice
+  if (choice === "auto") {
+    toolChoice = { auto: {} }
+  } else if (choice === "required") {
+    toolChoice = { any: {} }
+  } else if ("tool" in choice) {
+    toolChoice = { tool: { name: choice.tool } }
+  } else {
+    const allowed = new Set(choice.oneOf)
+    const filtered = tools.filter((t) => allowed.has(t.toolSpec.name))
+    tools.length = 0
+    tools.push(...filtered)
+    toolChoice = choice.mode === "required" ? { any: {} } : { auto: {} }
+  }
+
+  const toolConfig: typeof ToolConfiguration.Encoded | undefined = tools.length > 0
+    ? { tools, ...(Predicate.isNotUndefined(toolChoice) ? { toolChoice } : undefined) }
+    : undefined
+
+  return { toolConfig, nameMapper }
+})
+
+// =============================================================================
 // Response Conversion
 // =============================================================================
 
 const makeResponse: (
   request: typeof ConverseRequest.Encoded,
-  response: ConverseResponse
+  response: ConverseResponse,
+  options: LanguageModel.ProviderOptions,
+  nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>
 ) => Effect.Effect<
   Array<Response.PartEncoded>,
   never,
   IdGenerator.IdGenerator
-> = Effect.fnUntraced(function*(request, response) {
+> = Effect.fnUntraced(function*(request, response, options, nameMapper) {
   const parts: Array<Response.PartEncoded> = []
 
   parts.push({
@@ -323,14 +432,35 @@ const makeResponse: (
   })
 
   for (const part of response.output.message.content) {
-    // Non-text blocks decode with `text` undefined (the AWS ContentBlock union
-    // is tolerated by the schema) and are ignored by this text-only provider.
-    if (part.type === "text" && Predicate.isNotUndefined(part.text)) {
-      parts.push({
-        type: "text",
-        text: part.text
-      })
+    if (Predicate.isNotUndefined(part.text)) {
+      // Suppress plain text while in structured-output mode (the object arrives
+      // as a forced tool-use block below).
+      if (options.responseFormat.type === "text") {
+        parts.push({
+          type: "text",
+          text: part.text
+        })
+      }
+    } else if (Predicate.isNotUndefined(part.toolUse)) {
+      if (options.responseFormat.type === "json") {
+        // Structured output: re-emit the tool input as text for the LanguageModel
+        // layer to validate against the schema.
+        parts.push({
+          type: "text",
+          text: JSON.stringify(part.toolUse.input)
+        })
+      } else {
+        parts.push({
+          type: "tool-call",
+          id: part.toolUse.toolUseId,
+          name: nameMapper.getCustomName(part.toolUse.name),
+          params: part.toolUse.input,
+          providerExecuted: false
+        })
+      }
     }
+    // Other non-text blocks (reasoningContent, etc.) decode with these fields
+    // undefined and are ignored by this provider.
   }
 
   const finishReason = InternalUtilities.resolveFinishReason(response.stopReason)
