@@ -1,7 +1,7 @@
 import { AmazonBedrockClient, AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Redacted, Schema, Stream } from "effect"
-import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
+import { LanguageModel, Prompt, Tool, Toolkit } from "effect/unstable/ai"
 import { HttpClient, type HttpClientError, type HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { concat, eventFrame, exceptionFrame, happyPathFrames } from "./utils.ts"
 
@@ -261,6 +261,55 @@ describe("AmazonBedrockLanguageModel", () => {
         )
         assert.strictEqual(error.reason._tag, "InvalidRequestError")
         assert.include(error.message, "The provided model identifier is invalid.")
+      }))
+
+    it.effect("encodes an assistant tool-call as a toolUse block", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(toolResponse(request, [{ text: "done" }]))
+        }
+
+        const prompt = Prompt.fromMessages([
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "find ts" })] }),
+          Prompt.makeMessage("assistant", {
+            content: [Prompt.makePart("tool-call", {
+              id: "tu_1",
+              name: "GlobTool",
+              params: { pattern: "*.ts" },
+              providerExecuted: false
+            })]
+          }),
+          Prompt.makeMessage("tool", {
+            content: [Prompt.makePart("tool-result", {
+              id: "tu_1",
+              name: "GlobTool",
+              isFailure: false,
+              result: "a.ts\nb.ts"
+            })]
+          })
+        ])
+
+        yield* LanguageModel.generateText({ prompt, toolkit: globToolkit }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(globToolkitLayer)
+        )
+
+        const body = yield* getRequestBody(captured!)
+        const assistant = body.messages.find((m: any) => m.role === "assistant")
+        assert.deepStrictEqual(assistant.content[0].toolUse, {
+          toolUseId: "tu_1",
+          name: "GlobTool",
+          input: { pattern: "*.ts" }
+        })
+        const user = body.messages.find((m: any) =>
+          m.role === "user" && m.content.some((c: any) => c.toolResult !== undefined)
+        )
+        assert.deepStrictEqual(user.content.find((c: any) => c.toolResult).toolResult, {
+          toolUseId: "tu_1",
+          content: [{ text: JSON.stringify("a.ts\nb.ts") }]
+        })
       }))
   })
 

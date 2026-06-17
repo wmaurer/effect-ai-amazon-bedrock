@@ -4,10 +4,11 @@
  *
  * **Scope**
  *
- * Text-only: text in, streaming text out. Tool calling, images, documents,
- * reasoning, and structured output are not supported yet — requests that use
- * them fail loudly with `AiError.InvalidUserInputError` rather than silently
- * dropping content.
+ * Non-streaming requests support text, tool calling, tool-result messages, and
+ * structured output (the latter via forced tool use, since Converse has no
+ * native json_schema mode). Streaming is text-only. Images, documents, and
+ * reasoning are not supported yet — requests that use them fail loudly with
+ * `AiError.InvalidUserInputError` rather than silently dropping content.
  *
  * @since 4.0.0
  */
@@ -244,26 +245,42 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
           const content: Array<typeof ContentBlock.Encoded> = []
 
           for (const message of group.messages) {
-            if (message.role !== "user") {
-              return yield* AiError.make({
-                module: "AmazonBedrockLanguageModel",
-                method: "prepareMessages",
-                reason: new AiError.InvalidUserInputError({
-                  description: "Tool messages are not supported by this text-only provider"
-                })
-              })
-            }
-            for (const part of message.content) {
-              if (part.type === "text") {
-                content.push({ text: part.text })
-              } else {
-                return yield* AiError.make({
-                  module: "AmazonBedrockLanguageModel",
-                  method: "prepareMessages",
-                  reason: new AiError.InvalidUserInputError({
-                    description: `Unsupported user content part of type '${part.type}' - this provider is text-only`
+            switch (message.role) {
+              case "user": {
+                for (const part of message.content) {
+                  if (part.type === "text") {
+                    content.push({ text: part.text })
+                  } else {
+                    return yield* AiError.make({
+                      module: "AmazonBedrockLanguageModel",
+                      method: "prepareMessages",
+                      reason: new AiError.InvalidUserInputError({
+                        description: `Unsupported user content part of type '${part.type}' - this provider is text-only`
+                      })
+                    })
+                  }
+                }
+                break
+              }
+
+              case "tool": {
+                for (const part of message.content) {
+                  // Only tool-result parts map to Converse blocks; other tool
+                  // message parts (e.g. tool-approval responses) are skipped.
+                  if (part.type !== "tool-result") continue
+                  content.push({
+                    toolResult: {
+                      toolUseId: part.id,
+                      // Serialize the result with JSON.stringify to mirror the
+                      // Anthropic provider's tool-result handling, so object
+                      // results round-trip consistently across providers. (A
+                      // string result is therefore JSON-quoted, matching that
+                      // provider's behavior.)
+                      content: [{ text: JSON.stringify(part.result) }]
+                    }
                   })
-                })
+                }
+                break
               }
             }
           }
@@ -292,6 +309,14 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                   // Amazon Bedrock does not allow trailing whitespace in
                   // assistant content blocks
                   text: trimIfLast(isLastGroup, isLastMessage, isLastPart, part.text)
+                })
+              } else if (part.type === "tool-call") {
+                content.push({
+                  toolUse: {
+                    toolUseId: part.id,
+                    name: part.name,
+                    input: part.params
+                  }
                 })
               } else {
                 return yield* AiError.make({
