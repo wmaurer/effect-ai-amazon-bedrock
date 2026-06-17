@@ -148,6 +148,7 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
   )
 
   return yield* LanguageModel.make({
+    codecTransformer: toCodecAnthropic,
     generateText: Effect.fnUntraced(function*(options) {
       const { nameMapper, request } = yield* makeRequest(options)
       const rawResponse = yield* client.converse({ payload: request })

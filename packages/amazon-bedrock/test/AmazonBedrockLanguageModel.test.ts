@@ -313,6 +313,40 @@ describe("AmazonBedrockLanguageModel", () => {
       }))
   })
 
+  describe("generateObject", () => {
+    it.effect("forces a synthetic tool and extracts the structured result", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(jsonResponse(request, {
+            output: {
+              message: {
+                role: "assistant",
+                content: [{ toolUse: { toolUseId: "tu_1", name: "person", input: { name: "Ada", age: 36 } } }]
+              }
+            },
+            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            stopReason: "tool_use"
+          }))
+        }
+
+        const result = yield* LanguageModel.generateObject({
+          prompt: "Give me a person",
+          objectName: "person",
+          schema: Schema.Struct({ name: Schema.String, age: Schema.Number })
+        }).pipe(Effect.provide(layersFor(handler)))
+
+        assert.deepStrictEqual(result.value, { name: "Ada", age: 36 })
+
+        const body = yield* getRequestBody(captured!)
+        assert.strictEqual(body.toolConfig.tools.length, 1)
+        assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "person")
+        assert.strictEqual(body.toolConfig.toolChoice.tool.name, "person")
+        assert.strictEqual(body.toolConfig.tools[0].toolSpec.inputSchema.json.type, "object")
+      }))
+  })
+
   describe("streamText", () => {
     const streamParts = (frames: ReadonlyArray<Uint8Array>) =>
       LanguageModel.streamText({ prompt: "Hello" }).pipe(
