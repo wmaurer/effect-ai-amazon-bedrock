@@ -297,7 +297,8 @@ describe("AmazonBedrockLanguageModel", () => {
               id: "tu_1",
               name: "GlobTool",
               isFailure: false,
-              result: "a.ts\nb.ts"
+              result: "a.ts\nb.ts",
+              providerExecuted: false
             })]
           })
         ])
