@@ -666,6 +666,142 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual((error as any).reason._tag, "InvalidUserInputError")
         assert.include((error as any).message, "https://example.com/a.png")
       }))
+
+    const cacheResponse = (request: HttpClientRequest.HttpClientRequest) =>
+      jsonResponse(request, {
+        output: { message: { role: "assistant", content: [{ text: "done" }] } },
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        stopReason: "end_turn"
+      })
+
+    const captureBody = (prompt: Prompt.Prompt) =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(cacheResponse(request))
+        }
+
+        yield* LanguageModel.generateText({ prompt }).pipe(Effect.provide(layersFor(handler)))
+        return yield* getRequestBody(captured!)
+      })
+
+    const cachePoint = { amazonBedrock: { cachePoint: { type: "default" } } } as const
+
+    it.effect("inserts a cachePoint block after a system message that requests one", () =>
+      Effect.gen(function*() {
+        const body = yield* captureBody(Prompt.fromMessages([
+          Prompt.makeMessage("system", { content: "Long preamble", options: cachePoint }),
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Q" })] })
+        ]))
+
+        assert.deepStrictEqual(body.system, [
+          { text: "Long preamble" },
+          { cachePoint: { type: "default" } }
+        ])
+      }))
+
+    it.effect("inserts a cachePoint block after a text part that requests one", () =>
+      Effect.gen(function*() {
+        const body = yield* captureBody(Prompt.fromMessages([
+          Prompt.makeMessage("user", {
+            content: [
+              Prompt.makePart("text", { text: "Cached", options: cachePoint }),
+              Prompt.makePart("text", { text: "Fresh" })
+            ]
+          })
+        ]))
+
+        assert.deepStrictEqual(body.messages[0].content, [
+          { text: "Cached" },
+          { cachePoint: { type: "default" } },
+          { text: "Fresh" }
+        ])
+      }))
+
+    it.effect("carries the cache point ttl when one is given", () =>
+      Effect.gen(function*() {
+        const body = yield* captureBody(Prompt.fromMessages([
+          Prompt.makeMessage("user", {
+            content: [
+              Prompt.makePart("text", {
+                text: "Cached",
+                options: { amazonBedrock: { cachePoint: { type: "default", ttl: "1h" } } }
+              })
+            ]
+          })
+        ]))
+
+        assert.deepStrictEqual(body.messages[0].content[1], { cachePoint: { type: "default", ttl: "1h" } })
+      }))
+
+    it.effect("inserts a cachePoint block after the last block of a message that requests one", () =>
+      Effect.gen(function*() {
+        const body = yield* captureBody(Prompt.fromMessages([
+          Prompt.makeMessage("user", {
+            content: [
+              Prompt.makePart("text", { text: "One" }),
+              Prompt.makePart("text", { text: "Two" })
+            ],
+            options: cachePoint
+          })
+        ]))
+
+        assert.deepStrictEqual(body.messages[0].content, [
+          { text: "One" },
+          { text: "Two" },
+          { cachePoint: { type: "default" } }
+        ])
+      }))
+
+    it.effect("inserts a cachePoint block after a tool result that requests one", () =>
+      Effect.gen(function*() {
+        const body = yield* captureBody(Prompt.fromMessages([
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "find ts" })] }),
+          Prompt.makeMessage("assistant", {
+            content: [Prompt.makePart("tool-call", {
+              id: "tool-1",
+              name: "GlobTool",
+              params: { pattern: "*.ts" },
+              providerExecuted: false
+            })]
+          }),
+          Prompt.makeMessage("tool", {
+            content: [Prompt.makePart("tool-result", {
+              id: "tool-1",
+              name: "GlobTool",
+              isFailure: false,
+              result: { files: ["a.ts"] },
+              providerExecuted: false,
+              options: cachePoint
+            })]
+          })
+        ]))
+
+        const last = body.messages[body.messages.length - 1]
+        assert.strictEqual(last.role, "user")
+        assert.deepStrictEqual(last.content[1], { cachePoint: { type: "default" } })
+      }))
+
+    it.effect("inserts a cachePoint block after an assistant tool call that requests one", () =>
+      Effect.gen(function*() {
+        const body = yield* captureBody(Prompt.fromMessages([
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "find ts" })] }),
+          Prompt.makeMessage("assistant", {
+            content: [Prompt.makePart("tool-call", {
+              id: "tool-1",
+              name: "GlobTool",
+              params: { pattern: "*.ts" },
+              providerExecuted: false,
+              options: cachePoint
+            })]
+          }),
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Follow up" })] })
+        ]))
+
+        const assistant = body.messages.find((m: any) => m.role === "assistant")
+        assert.deepStrictEqual(assistant.content[1], { cachePoint: { type: "default" } })
+      }))
   })
 
   describe("generateObject", () => {

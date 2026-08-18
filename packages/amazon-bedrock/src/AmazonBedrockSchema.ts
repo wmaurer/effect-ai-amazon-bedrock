@@ -130,6 +130,24 @@ export const ReasoningContentBlock = Schema.Struct({
 })
 
 /**
+ * A cache point marking the end of a reusable prefix of a request.
+ *
+ * **Details**
+ *
+ * Converse caches everything preceding the block rather than the block it is
+ * attached to, so a cache point is its own content block appended after the
+ * content it should cover. `ttl` opts into extended caching; when omitted
+ * Bedrock uses the default lifetime for `type`.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class CachePointBlock extends Schema.Class<CachePointBlock>(makeIdentifier("CachePointBlock"))({
+  type: Schema.Literal("default"),
+  ttl: Schema.optional(Schema.Literals(["5m", "1h"]))
+}) {}
+
+/**
  * The location of an object in an Amazon S3 bucket.
  *
  * @category schemas
@@ -206,7 +224,8 @@ export const ContentBlock = Schema.Struct({
   toolResult: Schema.optional(ToolResultBlock),
   reasoningContent: Schema.optional(ReasoningContentBlock),
   image: Schema.optional(ImageBlock),
-  document: Schema.optional(DocumentBlock)
+  document: Schema.optional(DocumentBlock),
+  cachePoint: Schema.optional(CachePointBlock)
 })
 
 /**
@@ -221,13 +240,19 @@ export class Message extends Schema.Class<Message>(makeIdentifier("Message"))({
 }) {}
 
 /**
- * A system content block (text only).
+ * A system content block.
+ *
+ * **Details**
+ *
+ * AWS models `SystemContentBlock` as a UNION, so both members are optional; a
+ * block carries either the system text or a cache point.
  *
  * @category schemas
  * @since 4.0.0
  */
 export const SystemContentBlock = Schema.Struct({
-  text: Schema.String
+  text: Schema.optional(Schema.String),
+  cachePoint: Schema.optional(CachePointBlock)
 })
 
 /**

@@ -11,7 +11,8 @@
  * round-trip into later turns when they carry the Bedrock signature. Image and
  * document file parts are converted into Converse `image` / `document` blocks;
  * a media type Converse does not accept fails loudly with
- * `AiError.InvalidUserInputError` rather than silently dropping content.
+ * `AiError.InvalidUserInputError` rather than silently dropping content. Prompt
+ * caching is opt-in per message or per part via provider options.
  *
  * @since 4.0.0
  */
@@ -36,6 +37,7 @@ import type * as Response from "effect/unstable/ai/Response"
 import * as Tool from "effect/unstable/ai/Tool"
 import { AmazonBedrockClient } from "./AmazonBedrockClient.ts"
 import type {
+  CachePointBlock,
   ContentBlock,
   ConverseRequest,
   ConverseResponse,
@@ -58,6 +60,123 @@ import * as InternalUtilities from "./internal/utilities.ts"
  * @since 4.0.0
  */
 export type Model = string & {}
+
+// =============================================================================
+// Prompt Caching
+// =============================================================================
+
+/**
+ * A request to cache everything preceding a message or part.
+ *
+ * **Details**
+ *
+ * Converse caches a prefix of the request rather than an individual block, so
+ * this becomes a `cachePoint` block appended after the content it covers.
+ * Omitting `ttl` leaves the cache lifetime to Bedrock.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export type CachePoint = typeof CachePointBlock.Encoded
+
+/**
+ * The provider options through which a cache point is requested.
+ */
+interface CachePointOptions {
+  readonly amazonBedrock?: {
+    /**
+     * Marks the end of the reusable prefix of the request. The cache point is
+     * emitted after the content this is attached to.
+     */
+    readonly cachePoint?: CachePoint | null
+  } | null
+}
+
+declare module "effect/unstable/ai/Prompt" {
+  /**
+   * Amazon Bedrock options for system messages.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface SystemMessageOptions extends CachePointOptions {}
+
+  /**
+   * Amazon Bedrock options for user messages.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface UserMessageOptions extends CachePointOptions {}
+
+  /**
+   * Amazon Bedrock options for assistant messages.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface AssistantMessageOptions extends CachePointOptions {}
+
+  /**
+   * Amazon Bedrock options for tool messages.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface ToolMessageOptions extends CachePointOptions {}
+
+  /**
+   * Amazon Bedrock options for text prompt parts.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface TextPartOptions extends CachePointOptions {}
+
+  /**
+   * Amazon Bedrock options for file prompt parts.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface FilePartOptions extends CachePointOptions {}
+
+  /**
+   * Amazon Bedrock options for tool call prompt parts.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface ToolCallPartOptions extends CachePointOptions {}
+
+  /**
+   * Amazon Bedrock options for tool result prompt parts.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface ToolResultPartOptions extends CachePointOptions {}
+}
+
+/**
+ * Reads the cache point a message or part requests, if any.
+ */
+const getCachePoint = (carrier: { readonly options: CachePointOptions }): CachePoint | null =>
+  carrier.options.amazonBedrock?.cachePoint ?? null
+
+/**
+ * Appends the cache point a message or part requests, if any, after the blocks
+ * already emitted for it.
+ */
+const pushCachePoint = (
+  content: Array<typeof ContentBlock.Encoded>,
+  carrier: { readonly options: CachePointOptions }
+): void => {
+  const cachePoint = getCachePoint(carrier)
+  if (Predicate.isNotNull(cachePoint)) {
+    content.push({ cachePoint })
+  }
+}
 
 // =============================================================================
 // Reasoning
@@ -409,6 +528,10 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
           }
           for (const message of group.messages) {
             system.push({ text: message.content })
+            const cachePoint = getCachePoint(message)
+            if (Predicate.isNotNull(cachePoint)) {
+              system.push({ cachePoint })
+            }
           }
           break
         }
@@ -422,10 +545,12 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                 for (const part of message.content) {
                   if (part.type === "text") {
                     content.push({ text: part.text })
+                    pushCachePoint(content, part)
                   } else if (part.type === "file") {
                     const imageFormat = imageFormats[part.mediaType]
                     if (Predicate.isNotUndefined(imageFormat)) {
                       content.push({ image: { format: imageFormat, source: yield* fileSource(part.data) } })
+                      pushCachePoint(content, part)
                       continue
                     }
                     const documentFormat = documentFormats[part.mediaType]
@@ -438,6 +563,7 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                           source: yield* fileSource(part.data)
                         }
                       })
+                      pushCachePoint(content, part)
                       continue
                     }
                     return yield* AiError.make({
@@ -482,10 +608,12 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                       content: [{ text: JSON.stringify(part.result) }]
                     }
                   })
+                  pushCachePoint(content, part)
                 }
                 break
               }
             }
+            pushCachePoint(content, message)
           }
 
           messages.push({ role: "user", content })
@@ -513,6 +641,7 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                   // assistant content blocks
                   text: trimIfLast(isLastGroup, isLastMessage, isLastPart, part.text)
                 })
+                pushCachePoint(content, part)
               } else if (part.type === "reasoning") {
                 // Bedrock verifies the payload that accompanies a reasoning
                 // block, so a reasoning part that did not come from this
@@ -540,6 +669,7 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                     input: part.params
                   }
                 })
+                pushCachePoint(content, part)
               } else {
                 return yield* AiError.make({
                   module: "AmazonBedrockLanguageModel",
@@ -551,6 +681,7 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                 })
               }
             }
+            pushCachePoint(content, message)
           }
 
           messages.push({ role: "assistant", content })
