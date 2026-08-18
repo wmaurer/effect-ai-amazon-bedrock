@@ -8,8 +8,9 @@
  * streaming and non-streaming paths. Structured output is supported for
  * non-streaming requests via forced tool use, since Converse has no native
  * json_schema mode. Reasoning is surfaced on both paths, and reasoning blocks
- * round-trip into later turns when they carry the Bedrock signature. Images and
- * documents are not supported yet — requests that use them fail loudly with
+ * round-trip into later turns when they carry the Bedrock signature. Image and
+ * document file parts are converted into Converse `image` / `document` blocks;
+ * a media type Converse does not accept fails loudly with
  * `AiError.InvalidUserInputError` rather than silently dropping content.
  *
  * @since 4.0.0
@@ -17,6 +18,7 @@
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Encoding from "effect/Encoding"
 import { dual } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
@@ -38,6 +40,9 @@ import type {
   ConverseRequest,
   ConverseResponse,
   ConverseResponseStreamEvent,
+  DocumentBlock,
+  ImageBlock,
+  MediaSource,
   Message,
   SystemContentBlock,
   ToolChoice,
@@ -303,6 +308,77 @@ export const withConfigOverride: {
 // Prompt Conversion
 // =============================================================================
 
+/**
+ * Converse takes a format enum rather than a media type, so only the media
+ * types it has a format for can be sent. `image/*` is resolved to jpeg, which
+ * mirrors the other providers in this repo.
+ */
+const imageFormats: Record<string, typeof ImageBlock.Encoded["format"]> = {
+  "image/*": "jpeg",
+  "image/jpeg": "jpeg",
+  "image/png": "png",
+  "image/gif": "gif",
+  "image/webp": "webp"
+}
+
+const documentFormats: Record<string, typeof DocumentBlock.Encoded["format"]> = {
+  "application/pdf": "pdf",
+  "text/csv": "csv",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "text/html": "html",
+  "text/plain": "txt",
+  "text/markdown": "md"
+}
+
+/** Matches any absolute url, so a non-s3 one is rejected instead of being treated as base64 data. */
+const urlPattern = /^[a-z][a-z0-9+.-]*:\/\//i
+
+/**
+ * Resolves file part data into a Converse media source.
+ *
+ * **Details**
+ *
+ * String data is already base64 per `Prompt.FilePart`, so it is passed through
+ * untouched. The only remote source Converse accepts is an S3 location.
+ */
+const fileSource: (
+  data: typeof Prompt.FilePart.Type["data"]
+) => Effect.Effect<typeof MediaSource.Encoded, AiError.AiError> = Effect.fnUntraced(function*(data) {
+  if (data instanceof URL || (typeof data === "string" && urlPattern.test(data))) {
+    const url = data instanceof URL ? data : new URL(data)
+    if (url.protocol !== "s3:") {
+      return yield* AiError.make({
+        module: "AmazonBedrockLanguageModel",
+        method: "prepareMessages",
+        reason: new AiError.InvalidUserInputError({
+          description: `Unsupported file url '${url.toString()}' - this provider only accepts s3:// locations`
+        })
+      })
+    }
+    return { s3Location: { uri: url.toString() } }
+  }
+  return { bytes: typeof data === "string" ? data : Encoding.encodeBase64(data) }
+})
+
+/**
+ * Bedrock only accepts alphanumerics, single runs of whitespace, hyphens,
+ * parentheses and square brackets in a document name, so anything else is
+ * folded into a space. The file extension is dropped because the format is
+ * already carried separately.
+ */
+const documentName = (fileName: string | undefined, position: number): string => {
+  if (Predicate.isNotUndefined(fileName)) {
+    const name = fileName.replace(/\.[^.]*$/, "").replace(/[^a-zA-Z0-9\s\-()[\]]/g, " ").replace(/\s+/g, " ").trim()
+    if (name.length > 0) {
+      return name
+    }
+  }
+  return `document ${position}`
+}
+
 const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect<{
   readonly system: ReadonlyArray<typeof SystemContentBlock.Encoded>
   readonly messages: ReadonlyArray<typeof Message.Encoded>
@@ -312,6 +388,9 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
 
     const system: Array<typeof SystemContentBlock.Encoded> = []
     const messages: Array<typeof Message.Encoded> = []
+    // Document names must be present and distinct within a request, so unnamed
+    // documents are numbered across the whole conversation.
+    let documentCount = 0
 
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i]!
@@ -343,12 +422,43 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                 for (const part of message.content) {
                   if (part.type === "text") {
                     content.push({ text: part.text })
-                  } else {
+                  } else if (part.type === "file") {
+                    const imageFormat = imageFormats[part.mediaType]
+                    if (Predicate.isNotUndefined(imageFormat)) {
+                      content.push({ image: { format: imageFormat, source: yield* fileSource(part.data) } })
+                      continue
+                    }
+                    const documentFormat = documentFormats[part.mediaType]
+                    if (Predicate.isNotUndefined(documentFormat)) {
+                      documentCount = documentCount + 1
+                      content.push({
+                        document: {
+                          format: documentFormat,
+                          name: documentName(part.fileName, documentCount),
+                          source: yield* fileSource(part.data)
+                        }
+                      })
+                      continue
+                    }
                     return yield* AiError.make({
                       module: "AmazonBedrockLanguageModel",
                       method: "prepareMessages",
                       reason: new AiError.InvalidUserInputError({
-                        description: `Unsupported user content part of type '${part.type}' - this provider is text-only`
+                        description:
+                          `Unsupported media type '${part.mediaType}' for file part - this provider supports images and documents Converse has a format for`
+                      })
+                    })
+                  } else {
+                    // `UserMessagePart` is text | file today, so `part` is
+                    // `never` here; the branch keeps a part type added later
+                    // from being dropped silently.
+                    const unhandled: { readonly type: string } = part
+                    return yield* AiError.make({
+                      module: "AmazonBedrockLanguageModel",
+                      method: "prepareMessages",
+                      reason: new AiError.InvalidUserInputError({
+                        description:
+                          `Unsupported user content part of type '${unhandled.type}' - this provider supports text and file parts`
                       })
                     })
                   }

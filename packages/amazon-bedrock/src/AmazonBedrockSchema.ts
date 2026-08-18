@@ -130,6 +130,62 @@ export const ReasoningContentBlock = Schema.Struct({
 })
 
 /**
+ * The location of an object in an Amazon S3 bucket.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class S3Location extends Schema.Class<S3Location>(makeIdentifier("S3Location"))({
+  uri: Schema.String,
+  bucketOwner: Schema.optional(Schema.String)
+}) {}
+
+/**
+ * The source of an image or document.
+ *
+ * **Details**
+ *
+ * AWS models `ImageSource` and `DocumentSource` as UNIONs, so both members are
+ * optional here. `bytes` is a Smithy blob, which the JSON protocol carries as a
+ * base64 string.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const MediaSource = Schema.Struct({
+  bytes: Schema.optional(Schema.String),
+  s3Location: Schema.optional(S3Location)
+})
+
+/**
+ * An image content block.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class ImageBlock extends Schema.Class<ImageBlock>(makeIdentifier("ImageBlock"))({
+  format: Schema.Literals(["png", "jpeg", "gif", "webp"]),
+  source: MediaSource
+}) {}
+
+/**
+ * A document content block.
+ *
+ * **Details**
+ *
+ * `name` is required and Bedrock restricts it to alphanumerics, single runs of
+ * whitespace, hyphens, parentheses and square brackets.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class DocumentBlock extends Schema.Class<DocumentBlock>(makeIdentifier("DocumentBlock"))({
+  format: Schema.Literals(["pdf", "csv", "doc", "docx", "xls", "xlsx", "html", "txt", "md"]),
+  name: Schema.String,
+  source: MediaSource
+}) {}
+
+/**
  * A text content block within a Converse message.
  *
  * **Details**
@@ -148,7 +204,9 @@ export const ContentBlock = Schema.Struct({
   text: Schema.optional(Schema.String),
   toolUse: Schema.optional(ToolUseBlock),
   toolResult: Schema.optional(ToolResultBlock),
-  reasoningContent: Schema.optional(ReasoningContentBlock)
+  reasoningContent: Schema.optional(ReasoningContentBlock),
+  image: Schema.optional(ImageBlock),
+  document: Schema.optional(DocumentBlock)
 })
 
 /**

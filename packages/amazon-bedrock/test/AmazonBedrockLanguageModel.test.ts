@@ -550,6 +550,122 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "GlobTool")
         assert.isDefined(body.toolConfig.toolChoice.auto)
       }))
+
+    const fileResponse = (request: HttpClientRequest.HttpClientRequest) =>
+      jsonResponse(request, {
+        output: { message: { role: "assistant", content: [{ text: "done" }] } },
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        stopReason: "end_turn"
+      })
+
+    const captureUserContent = (parts: ReadonlyArray<Prompt.UserMessagePart>) =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(fileResponse(request))
+        }
+
+        const prompt = Prompt.fromMessages([Prompt.makeMessage("user", { content: parts })])
+        yield* LanguageModel.generateText({ prompt }).pipe(Effect.provide(layersFor(handler)))
+
+        const body = yield* getRequestBody(captured!)
+        return body.messages[0].content
+      })
+
+    it.effect("encodes an image file part as an image block", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", { mediaType: "image/png", data: new Uint8Array([1, 2, 3]) }),
+          Prompt.makePart("text", { text: "What is this?" })
+        ])
+
+        assert.deepStrictEqual(content, [
+          { image: { format: "png", source: { bytes: "AQID" } } },
+          { text: "What is this?" }
+        ])
+      }))
+
+    it.effect("passes base64 image data through unchanged", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", { mediaType: "image/jpeg", data: "AQID" })
+        ])
+
+        assert.deepStrictEqual(content, [{ image: { format: "jpeg", source: { bytes: "AQID" } } }])
+      }))
+
+    it.effect("maps the image/* media type to jpeg", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", { mediaType: "image/*", data: "AQID" })
+        ])
+
+        assert.strictEqual(content[0].image.format, "jpeg")
+      }))
+
+    it.effect("encodes a document file part as a document block", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", {
+            mediaType: "application/pdf",
+            fileName: "quarterly_report.pdf",
+            data: new Uint8Array([1, 2, 3])
+          })
+        ])
+
+        // Bedrock only accepts alphanumerics, single spaces, hyphens,
+        // parentheses and square brackets in a document name.
+        assert.deepStrictEqual(content, [{
+          document: { format: "pdf", name: "quarterly report", source: { bytes: "AQID" } }
+        }])
+      }))
+
+    it.effect("generates a document name when the file part has none", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", { mediaType: "text/plain", data: "AQID" }),
+          Prompt.makePart("file", { mediaType: "text/csv", data: "AQID" })
+        ])
+
+        assert.strictEqual(content[0].document.name, "document 1")
+        assert.strictEqual(content[0].document.format, "txt")
+        assert.strictEqual(content[1].document.name, "document 2")
+        assert.strictEqual(content[1].document.format, "csv")
+      }))
+
+    it.effect("encodes an s3 file url as an s3Location source", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", { mediaType: "image/png", data: new URL("s3://bucket/key.png") })
+        ])
+
+        assert.deepStrictEqual(content, [{
+          image: { format: "png", source: { s3Location: { uri: "s3://bucket/key.png" } } }
+        }])
+      }))
+
+    it.effect("fails on an unsupported file media type", () =>
+      Effect.gen(function*() {
+        const error = yield* Effect.flip(
+          captureUserContent([Prompt.makePart("file", { mediaType: "video/mp4", data: "AQID" })])
+        )
+
+        assert.strictEqual((error as any).reason._tag, "InvalidUserInputError")
+        assert.include((error as any).message, "video/mp4")
+      }))
+
+    it.effect("fails on a file url that is not an s3 location", () =>
+      Effect.gen(function*() {
+        const error = yield* Effect.flip(
+          captureUserContent([
+            Prompt.makePart("file", { mediaType: "image/png", data: new URL("https://example.com/a.png") })
+          ])
+        )
+
+        assert.strictEqual((error as any).reason._tag, "InvalidUserInputError")
+        assert.include((error as any).message, "https://example.com/a.png")
+      }))
   })
 
   describe("generateObject", () => {
