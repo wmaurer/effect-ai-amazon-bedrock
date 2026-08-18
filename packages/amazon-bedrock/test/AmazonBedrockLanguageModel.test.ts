@@ -504,32 +504,173 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.include(JSON.stringify(errorPart), "Slow down")
       }))
 
-    it.effect("fails loudly when streaming with tools", () =>
+    const StreamGlobTool = Tool.make("GlobTool", {
+      description: "Search for files",
+      parameters: Schema.Struct({ pattern: Schema.String }),
+      success: Schema.String
+    })
+    const streamGlobToolkit = Toolkit.make(StreamGlobTool)
+    const streamGlobToolkitLayer = streamGlobToolkit.toLayer({ GlobTool: () => Effect.succeed("found.ts") })
+
+    const toolStreamFrames: ReadonlyArray<Uint8Array> = [
+      eventFrame("messageStart", { role: "assistant" }),
+      eventFrame("contentBlockStart", {
+        contentBlockIndex: 0,
+        start: { toolUse: { toolUseId: "tu_1", name: "GlobTool" } }
+      }),
+      eventFrame("contentBlockDelta", { contentBlockIndex: 0, delta: { toolUse: { input: "{\"pattern\":" } } }),
+      eventFrame("contentBlockDelta", { contentBlockIndex: 0, delta: { toolUse: { input: "\"*.ts\"}" } } }),
+      eventFrame("contentBlockStop", { contentBlockIndex: 0 }),
+      eventFrame("messageStop", { stopReason: "tool_use" }),
+      eventFrame("metadata", { usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 } })
+    ]
+
+    const streamToolParts = (frames: ReadonlyArray<Uint8Array>) =>
+      LanguageModel.streamText({
+        prompt: "find ts files",
+        toolkit: streamGlobToolkit,
+        // Do not auto-resolve the tool call; we want to inspect the emitted parts.
+        disableToolCallResolution: true
+      }).pipe(
+        Stream.runCollect,
+        Effect.map((chunk) => globalThis.Array.from(chunk)),
+        Effect.provide(layersFor((request) => Effect.succeed(binaryResponse(request, concat(frames))))),
+        Effect.provide(streamGlobToolkitLayer)
+      )
+
+    it.effect("streams a tool-use block as tool-params parts and a final tool-call", () =>
       Effect.gen(function*() {
-        const StreamGlobTool = Tool.make("GlobTool", {
-          description: "Search for files",
-          parameters: Schema.Struct({ pattern: Schema.String }),
+        const parts = yield* streamToolParts(toolStreamFrames)
+        assert.deepStrictEqual(parts.map((part) => part.type), [
+          "response-metadata",
+          "tool-params-start",
+          "tool-params-delta",
+          "tool-params-delta",
+          "tool-params-end",
+          "tool-call",
+          "finish"
+        ])
+
+        const start = parts.find((part) => part.type === "tool-params-start")
+        if (start?.type === "tool-params-start") {
+          assert.strictEqual(start.id, "tu_1")
+          assert.strictEqual(start.name, "GlobTool")
+        }
+
+        const deltas = parts
+          .filter((part) => part.type === "tool-params-delta")
+          .map((part) => (part as { delta: string }).delta)
+        assert.deepStrictEqual(deltas, ["{\"pattern\":", "\"*.ts\"}"])
+
+        const toolCall = parts.find((part) => part.type === "tool-call")
+        if (toolCall?.type === "tool-call") {
+          assert.strictEqual(toolCall.id, "tu_1")
+          assert.strictEqual(toolCall.name, "GlobTool")
+          assert.deepStrictEqual(toolCall.params, { pattern: "*.ts" })
+        }
+
+        const finish = parts[parts.length - 1]!
+        if (finish.type === "finish") {
+          assert.strictEqual(finish.reason, "tool-calls")
+        }
+      }))
+
+    it.effect("emits an empty params object for a tool-use block with no deltas", () =>
+      Effect.gen(function*() {
+        // A tool taking no arguments: Bedrock announces the block and stops it
+        // without ever sending a `toolUse` delta.
+        const PingTool = Tool.make("PingTool", {
+          description: "Ping",
+          parameters: Schema.Struct({}),
           success: Schema.String
         })
-        const streamGlobToolkit = Toolkit.make(StreamGlobTool)
-        const streamGlobToolkitLayer = streamGlobToolkit.toLayer({ GlobTool: () => Effect.succeed("found.ts") })
+        const pingToolkit = Toolkit.make(PingTool)
 
-        const handler = (request: HttpClientRequest.HttpClientRequest) =>
-          Effect.succeed(jsonResponse(request, {
-            output: { message: { role: "assistant", content: [{ text: "ok" }] } },
-            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-            stopReason: "end_turn"
-          }))
+        const frames = [
+          eventFrame("messageStart", { role: "assistant" }),
+          eventFrame("contentBlockStart", {
+            contentBlockIndex: 0,
+            start: { toolUse: { toolUseId: "tu_1", name: "PingTool" } }
+          }),
+          eventFrame("contentBlockStop", { contentBlockIndex: 0 }),
+          eventFrame("messageStop", { stopReason: "tool_use" }),
+          eventFrame("metadata", { usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } })
+        ]
 
-        const error = yield* LanguageModel.streamText({ prompt: "x", toolkit: streamGlobToolkit }).pipe(
-          Stream.runDrain,
-          Effect.provide(layersFor(handler)),
-          Effect.provide(streamGlobToolkitLayer),
-          Effect.flip
+        const parts = yield* LanguageModel.streamText({
+          prompt: "ping",
+          toolkit: pingToolkit,
+          disableToolCallResolution: true
+        }).pipe(
+          Stream.runCollect,
+          Effect.map((chunk) => globalThis.Array.from(chunk)),
+          Effect.provide(layersFor((request) => Effect.succeed(binaryResponse(request, concat(frames))))),
+          Effect.provide(pingToolkit.toLayer({ PingTool: () => Effect.succeed("pong") }))
         )
 
-        assert.strictEqual(error._tag, "AiError")
-        assert.include(JSON.stringify(error), "not supported")
+        const toolCall = parts.find((part) => part.type === "tool-call")
+        assert.isDefined(toolCall)
+        if (toolCall?.type === "tool-call") {
+          assert.deepStrictEqual(toolCall.params, {})
+        }
+      }))
+
+    it.effect("keeps text and tool blocks separate by content-block index", () =>
+      Effect.gen(function*() {
+        const parts = yield* streamToolParts([
+          eventFrame("messageStart", { role: "assistant" }),
+          eventFrame("contentBlockDelta", { contentBlockIndex: 0, delta: { text: "Looking" } }),
+          eventFrame("contentBlockStart", {
+            contentBlockIndex: 1,
+            start: { toolUse: { toolUseId: "tu_1", name: "GlobTool" } }
+          }),
+          eventFrame("contentBlockDelta", {
+            contentBlockIndex: 1,
+            delta: { toolUse: { input: "{\"pattern\":\"*.ts\"}" } }
+          }),
+          eventFrame("contentBlockStop", { contentBlockIndex: 0 }),
+          eventFrame("contentBlockStop", { contentBlockIndex: 1 }),
+          eventFrame("messageStop", { stopReason: "tool_use" }),
+          eventFrame("metadata", { usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } })
+        ])
+
+        assert.deepStrictEqual(parts.map((part) => part.type), [
+          "response-metadata",
+          "text-start",
+          "text-delta",
+          "tool-params-start",
+          "tool-params-delta",
+          "text-end",
+          "tool-params-end",
+          "tool-call",
+          "finish"
+        ])
+      }))
+
+    it.effect("sends toolConfig on the converse-stream request", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(binaryResponse(request, concat(toolStreamFrames)))
+        }
+
+        yield* LanguageModel.streamText({
+          prompt: "find ts files",
+          toolkit: streamGlobToolkit,
+          disableToolCallResolution: true
+        }).pipe(
+          Stream.runDrain,
+          Effect.provide(layersFor(handler)),
+          Effect.provide(streamGlobToolkitLayer)
+        )
+
+        assert.strictEqual(
+          captured!.url,
+          "https://bedrock-runtime.us-east-1.amazonaws.com/model/us.test.model-v1:0/converse-stream"
+        )
+        const body = yield* getRequestBody(captured!)
+        assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "GlobTool")
       }))
   })
 })

@@ -4,11 +4,12 @@
  *
  * **Scope**
  *
- * Non-streaming requests support text, tool calling, tool-result messages, and
- * structured output (the latter via forced tool use, since Converse has no
- * native json_schema mode). Streaming is text-only. Images, documents, and
- * reasoning are not supported yet — requests that use them fail loudly with
- * `AiError.InvalidUserInputError` rather than silently dropping content.
+ * Text, tool calling, and tool-result messages are supported in both the
+ * streaming and non-streaming paths. Structured output is supported for
+ * non-streaming requests via forced tool use, since Converse has no native
+ * json_schema mode. Images, documents, and reasoning are not supported yet —
+ * requests that use them fail loudly with `AiError.InvalidUserInputError`
+ * rather than silently dropping content.
  *
  * @since 4.0.0
  */
@@ -155,18 +156,9 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
       return yield* makeResponse(request, rawResponse, options, nameMapper)
     }),
     streamText: Effect.fnUntraced(function*(options) {
-      if (options.tools.length > 0 || options.responseFormat.type !== "text") {
-        return yield* AiError.make({
-          module: "AmazonBedrockLanguageModel",
-          method: "streamText",
-          reason: new AiError.InvalidUserInputError({
-            description: "Streaming tool calls and structured output are not supported yet; use generateText"
-          })
-        })
-      }
-      const request = (yield* makeRequest(options)).request
+      const { nameMapper, request } = yield* makeRequest(options)
       const stream = client.converseStream({ payload: request })
-      return yield* makeStreamResponse(request, stream)
+      return yield* makeStreamResponse(request, stream, nameMapper)
     }, (effect, _options) => effect.pipe(Stream.unwrap))
   })
 })
@@ -522,16 +514,22 @@ const makeResponse: (
 
 const makeStreamResponse: (
   request: typeof ConverseRequest.Encoded,
-  stream: Stream.Stream<ConverseResponseStreamEvent, AiError.AiError>
+  stream: Stream.Stream<ConverseResponseStreamEvent, AiError.AiError>,
+  nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>
 ) => Effect.Effect<
   Stream.Stream<Response.StreamPartEncoded, AiError.AiError>,
   never,
   IdGenerator.IdGenerator
 > = Effect.fnUntraced(
-  function*(request, stream) {
+  function*(request, stream, nameMapper) {
     // Tracks whether a text block at a given content-block index has been
     // started (text blocks are lazily started on first delta).
     const startedBlocks = new Set<number>()
+
+    // Tool-use blocks in flight, keyed by content-block index. Bedrock streams
+    // tool arguments as partial JSON, so the fragments are accumulated here and
+    // parsed once the block stops.
+    const toolBlocks = new Map<number, { readonly id: string; readonly name: string; params: string }>()
 
     const usage: Mutable<{
       inputTokens: number
@@ -570,20 +568,49 @@ const makeStreamResponse: (
 
           case "contentBlockStart": {
             // Tool-use blocks announce themselves here; text blocks start
-            // directly with deltas. This text-only provider ignores the event
-            // and synthesizes `text-start` on the first text delta instead.
+            // directly with deltas, so `text-start` is synthesized on the first
+            // text delta instead.
+            const start = event.contentBlockStart.start?.toolUse
+            if (Predicate.isUndefined(start)) {
+              break
+            }
+            const name = nameMapper.getCustomName(start.name)
+            toolBlocks.set(event.contentBlockStart.contentBlockIndex, {
+              id: start.toolUseId,
+              name,
+              params: ""
+            })
+            parts.push({
+              type: "tool-params-start",
+              id: start.toolUseId,
+              name
+            })
             break
           }
 
           case "contentBlockDelta": {
-            // Non-text deltas (the AWS ContentBlockDelta union: toolUse,
-            // reasoningContent, ...) decode with `text` undefined and are
-            // skipped by this text-only provider.
+            const index = event.contentBlockDelta.contentBlockIndex
+            const toolUse = event.contentBlockDelta.delta.toolUse
+            if (Predicate.isNotUndefined(toolUse)) {
+              const block = toolBlocks.get(index)
+              // A toolUse delta without a preceding `contentBlockStart` has no
+              // call id to attribute it to, so it is dropped.
+              if (Predicate.isNotUndefined(block)) {
+                block.params += toolUse.input
+                parts.push({
+                  type: "tool-params-delta",
+                  id: block.id,
+                  delta: toolUse.input
+                })
+              }
+              break
+            }
+            // Deltas this provider does not model (reasoningContent,
+            // citation, ...) decode with every key undefined and are skipped.
             const text = event.contentBlockDelta.delta.text
             if (Predicate.isUndefined(text)) {
               break
             }
-            const index = event.contentBlockDelta.contentBlockIndex
             if (!startedBlocks.has(index)) {
               startedBlocks.add(index)
               parts.push({
@@ -606,6 +633,22 @@ const makeStreamResponse: (
               parts.push({
                 type: "text-end",
                 id: index.toString()
+              })
+            }
+            const block = toolBlocks.get(index)
+            if (Predicate.isNotUndefined(block)) {
+              toolBlocks.delete(index)
+              parts.push({
+                type: "tool-params-end",
+                id: block.id
+              })
+              parts.push({
+                type: "tool-call",
+                id: block.id,
+                name: block.name,
+                // A tool taking no arguments streams no deltas at all.
+                params: Tool.unsafeSecureJsonParse(block.params.length === 0 ? "{}" : block.params),
+                providerExecuted: false
               })
             }
             break

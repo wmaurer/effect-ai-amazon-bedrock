@@ -275,21 +275,34 @@ export class MessageStartEvent extends Schema.Class<MessageStartEvent>(
 }) {}
 
 /**
+ * The tool-use member of a streaming content-block delta. Bedrock streams tool
+ * arguments as a partial JSON string that the consumer accumulates across
+ * deltas and parses once the block stops.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const ToolUseBlockDelta = Schema.Struct({
+  input: Schema.String
+})
+
+/**
  * A delta within a streaming content block.
  *
  * **Details**
  *
  * AWS models `ContentBlockDelta` as a UNION whose members (`text`, `toolUse`,
- * `reasoningContent`, `citation`, ...) are all optional. `text` is optional
- * here so a non-text delta (e.g. reasoning content from a model that reasons
- * by default) does not fail the union decode and truncate the stream; the
- * language model skips deltas without `text`.
+ * `reasoningContent`, `citation`, ...) are all optional. Every member is
+ * optional here so a delta this provider does not model (e.g. reasoning
+ * content from a model that reasons by default) does not fail the union decode
+ * and truncate the stream; the language model skips such deltas.
  *
  * @category schemas
  * @since 4.0.0
  */
 export const ContentBlockDelta = Schema.Struct({
-  text: Schema.optional(Schema.String)
+  text: Schema.optional(Schema.String),
+  toolUse: Schema.optional(ToolUseBlockDelta)
 })
 
 /**
@@ -318,12 +331,38 @@ export class ContentBlockStopEvent extends Schema.Class<ContentBlockStopEvent>(
 }) {}
 
 /**
+ * The tool-use member of a streaming content-block start. Carries the call id
+ * and tool name; the arguments arrive as `toolUse` deltas.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const ToolUseBlockStart = Schema.Struct({
+  toolUseId: Schema.String,
+  name: Schema.String
+})
+
+/**
+ * The start of a streaming content block.
+ *
+ * **Details**
+ *
+ * Like `ContentBlockDelta`, AWS models this as a union of optional members.
+ * Members this provider does not model decode with their keys undefined rather
+ * than failing the union decode and truncating the stream.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const ContentBlockStart = Schema.Struct({
+  toolUse: Schema.optional(ToolUseBlockStart)
+})
+
+/**
  * AWS may emit a `contentBlockStart` frame before a block's deltas (it always
  * does for tool-use blocks, where `start` carries `toolUse`; text blocks
  * typically start directly with deltas). The union must accept it or the whole
- * stream fails to decode. `start` is kept as `Unknown` since this text-only
- * provider ignores the event (the LM synthesizes `text-start` on the first
- * delta).
+ * stream fails to decode.
  *
  * @category schemas
  * @since 4.0.0
@@ -332,7 +371,7 @@ export class ContentBlockStartEvent extends Schema.Class<ContentBlockStartEvent>
   makeIdentifier("ContentBlockStartEvent")
 )({
   contentBlockIndex: IntZeroOrGreater,
-  start: Schema.optional(Schema.Unknown)
+  start: Schema.optional(ContentBlockStart)
 }) {}
 
 /**
