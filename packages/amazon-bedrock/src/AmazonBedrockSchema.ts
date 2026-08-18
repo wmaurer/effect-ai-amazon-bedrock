@@ -6,7 +6,7 @@
  * **Scope**
  *
  * This models text and tool use (tool-use / tool-result content blocks and tool
- * configuration). Images, documents, and reasoning are not modelled here yet,
+ * configuration). Images and documents are not modelled here yet,
  * but the content block and delta unions tolerate (and ignore) non-text members
  * so decoding never fails on them.
  *
@@ -95,15 +95,50 @@ export class ToolResultBlock extends Schema.Class<ToolResultBlock>(makeIdentifie
 }) {}
 
 /**
+ * The reasoning text produced by a model, with the token that verifies the
+ * model generated it.
+ *
+ * **Details**
+ *
+ * `signature` must be echoed back unmodified alongside the text when the block
+ * is sent in a later turn, or Bedrock rejects the request.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class ReasoningTextBlock extends Schema.Class<ReasoningTextBlock>(makeIdentifier("ReasoningTextBlock"))({
+  text: Schema.String,
+  signature: Schema.optional(Schema.String)
+}) {}
+
+/**
+ * A reasoning content block.
+ *
+ * **Details**
+ *
+ * AWS models `ReasoningContentBlock` as a UNION of `reasoningText` and
+ * `redactedContent`, so both members are optional here. `redactedContent` is a
+ * Smithy blob, which the JSON protocol carries as a base64 string; it is kept
+ * as that string so it round-trips untouched.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const ReasoningContentBlock = Schema.Struct({
+  reasoningText: Schema.optional(ReasoningTextBlock),
+  redactedContent: Schema.optional(Schema.String)
+})
+
+/**
  * A text content block within a Converse message.
  *
  * **Details**
  *
  * AWS models `ContentBlock` as a UNION whose members (`text`, `toolUse`,
- * `reasoningContent`, ...) are all optional. `text` is optional here so a
- * non-text block in a response decodes (as `{ type: "text" }` with no `text`)
- * instead of failing the whole response; the language model ignores blocks
- * without `text`. On encode this text-only provider always supplies `text`.
+ * `reasoningContent`, ...) are all optional. Every member is optional here so
+ * a block this provider does not model (e.g. `citationsContent`) decodes (as
+ * `{ type: "text" }` with no `text`) instead of failing the whole response;
+ * the language model ignores such blocks.
  *
  * @category schemas
  * @since 4.0.0
@@ -112,7 +147,8 @@ export const ContentBlock = Schema.Struct({
   type: Schema.tagDefaultOmit("text"),
   text: Schema.optional(Schema.String),
   toolUse: Schema.optional(ToolUseBlock),
-  toolResult: Schema.optional(ToolResultBlock)
+  toolResult: Schema.optional(ToolResultBlock),
+  reasoningContent: Schema.optional(ReasoningContentBlock)
 })
 
 /**
@@ -287,22 +323,41 @@ export const ToolUseBlockDelta = Schema.Struct({
 })
 
 /**
+ * The reasoning-content member of a streaming content-block delta.
+ *
+ * **Details**
+ *
+ * AWS models `ReasoningContentBlockDelta` as a UNION of `text`, `signature`,
+ * and `redactedContent`, so every member is optional. The signature arrives in
+ * its own delta after the text deltas, once the model has finished reasoning.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const ReasoningContentBlockDelta = Schema.Struct({
+  text: Schema.optional(Schema.String),
+  signature: Schema.optional(Schema.String),
+  redactedContent: Schema.optional(Schema.String)
+})
+
+/**
  * A delta within a streaming content block.
  *
  * **Details**
  *
  * AWS models `ContentBlockDelta` as a UNION whose members (`text`, `toolUse`,
  * `reasoningContent`, `citation`, ...) are all optional. Every member is
- * optional here so a delta this provider does not model (e.g. reasoning
- * content from a model that reasons by default) does not fail the union decode
- * and truncate the stream; the language model skips such deltas.
+ * optional here so a delta this provider does not model (e.g. a citation) does
+ * not fail the union decode and truncate the stream; the language model skips
+ * such deltas.
  *
  * @category schemas
  * @since 4.0.0
  */
 export const ContentBlockDelta = Schema.Struct({
   text: Schema.optional(Schema.String),
-  toolUse: Schema.optional(ToolUseBlockDelta)
+  toolUse: Schema.optional(ToolUseBlockDelta),
+  reasoningContent: Schema.optional(ReasoningContentBlockDelta)
 })
 
 /**

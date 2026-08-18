@@ -119,7 +119,7 @@ describe("AmazonBedrockLanguageModel", () => {
               message: {
                 role: "assistant",
                 content: [
-                  { reasoningContent: { reasoningText: { text: "thinking" } } },
+                  { citationsContent: { citations: [] } },
                   { text: "Answer" }
                 ]
               }
@@ -132,6 +132,193 @@ describe("AmazonBedrockLanguageModel", () => {
           Effect.provide(layersFor(handler))
         )
         assert.strictEqual(response.text, "Answer")
+      }))
+
+    const reasoningResponse = (request: HttpClientRequest.HttpClientRequest, content: ReadonlyArray<unknown>) =>
+      jsonResponse(request, {
+        output: { message: { role: "assistant", content } },
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        stopReason: "end_turn"
+      })
+
+    it.effect("decodes a reasoningContent block into a reasoning part", () =>
+      Effect.gen(function*() {
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(reasoningResponse(request, [
+            { reasoningContent: { reasoningText: { text: "Let me think", signature: "sig_abc" } } },
+            { text: "Answer" }
+          ]))
+
+        const response = yield* LanguageModel.generateText({ prompt: "Q" }).pipe(
+          Effect.provide(layersFor(handler))
+        )
+
+        assert.strictEqual(response.text, "Answer")
+        assert.strictEqual(response.reasoningText, "Let me think")
+        const reasoning = response.reasoning[0]
+        assert.isDefined(reasoning)
+        assert.deepStrictEqual(reasoning?.metadata.amazonBedrock, {
+          info: { type: "reasoningText", signature: "sig_abc" }
+        })
+      }))
+
+    it.effect("decodes an unsigned reasoningText block with a null signature", () =>
+      Effect.gen(function*() {
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(reasoningResponse(request, [
+            { reasoningContent: { reasoningText: { text: "Let me think" } } },
+            { text: "Answer" }
+          ]))
+
+        const response = yield* LanguageModel.generateText({ prompt: "Q" }).pipe(
+          Effect.provide(layersFor(handler))
+        )
+
+        assert.deepStrictEqual(response.reasoning[0]?.metadata.amazonBedrock, {
+          info: { type: "reasoningText", signature: null }
+        })
+      }))
+
+    it.effect("omits the signature when sending back an unsigned reasoning part", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(reasoningResponse(request, [{ text: "done" }]))
+        }
+
+        const prompt = Prompt.fromMessages([
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Q" })] }),
+          Prompt.makeMessage("assistant", {
+            content: [
+              Prompt.makePart("reasoning", {
+                text: "Let me think",
+                options: { amazonBedrock: { info: { type: "reasoningText", signature: null } } }
+              }),
+              Prompt.makePart("text", { text: "Answer" })
+            ]
+          }),
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Follow up" })] })
+        ])
+
+        yield* LanguageModel.generateText({ prompt }).pipe(Effect.provide(layersFor(handler)))
+
+        const body = yield* getRequestBody(captured!)
+        const assistant = body.messages.find((m: any) => m.role === "assistant")
+        assert.deepStrictEqual(assistant.content[0], {
+          reasoningContent: { reasoningText: { text: "Let me think" } }
+        })
+      }))
+
+    it.effect("decodes a redacted reasoning block into an empty reasoning part", () =>
+      Effect.gen(function*() {
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(reasoningResponse(request, [
+            { reasoningContent: { redactedContent: "cmVkYWN0ZWQ=" } },
+            { text: "Answer" }
+          ]))
+
+        const response = yield* LanguageModel.generateText({ prompt: "Q" }).pipe(
+          Effect.provide(layersFor(handler))
+        )
+
+        const reasoning = response.reasoning[0]
+        assert.isDefined(reasoning)
+        assert.strictEqual(reasoning?.text, "")
+        assert.deepStrictEqual(reasoning?.metadata.amazonBedrock, {
+          info: { type: "redactedContent", redactedContent: "cmVkYWN0ZWQ=" }
+        })
+      }))
+
+    it.effect("encodes an assistant reasoning part as a reasoningContent block", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(reasoningResponse(request, [{ text: "done" }]))
+        }
+
+        const prompt = Prompt.fromMessages([
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Q" })] }),
+          Prompt.makeMessage("assistant", {
+            content: [
+              Prompt.makePart("reasoning", {
+                text: "Let me think",
+                options: { amazonBedrock: { info: { type: "reasoningText", signature: "sig_abc" } } }
+              }),
+              Prompt.makePart("text", { text: "Answer" })
+            ]
+          }),
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Follow up" })] })
+        ])
+
+        yield* LanguageModel.generateText({ prompt }).pipe(Effect.provide(layersFor(handler)))
+
+        const body = yield* getRequestBody(captured!)
+        const assistant = body.messages.find((m: any) => m.role === "assistant")
+        assert.deepStrictEqual(assistant.content[0], {
+          reasoningContent: { reasoningText: { text: "Let me think", signature: "sig_abc" } }
+        })
+        assert.deepStrictEqual(assistant.content[1], { text: "Answer" })
+      }))
+
+    it.effect("encodes a redacted assistant reasoning part as a reasoningContent block", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(reasoningResponse(request, [{ text: "done" }]))
+        }
+
+        const prompt = Prompt.fromMessages([
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Q" })] }),
+          Prompt.makeMessage("assistant", {
+            content: [
+              Prompt.makePart("reasoning", {
+                text: "",
+                options: {
+                  amazonBedrock: { info: { type: "redactedContent", redactedContent: "cmVkYWN0ZWQ=" } }
+                }
+              }),
+              Prompt.makePart("text", { text: "Answer" })
+            ]
+          }),
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Follow up" })] })
+        ])
+
+        yield* LanguageModel.generateText({ prompt }).pipe(Effect.provide(layersFor(handler)))
+
+        const body = yield* getRequestBody(captured!)
+        const assistant = body.messages.find((m: any) => m.role === "assistant")
+        assert.deepStrictEqual(assistant.content[0], {
+          reasoningContent: { redactedContent: "cmVkYWN0ZWQ=" }
+        })
+      }))
+
+    it.effect("drops an assistant reasoning part that carries no provider info", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(reasoningResponse(request, [{ text: "done" }]))
+        }
+
+        const prompt = Prompt.fromMessages([
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Q" })] }),
+          Prompt.makeMessage("assistant", {
+            content: [
+              Prompt.makePart("reasoning", { text: "Let me think" }),
+              Prompt.makePart("text", { text: "Answer" })
+            ]
+          }),
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Follow up" })] })
+        ])
+
+        yield* LanguageModel.generateText({ prompt }).pipe(Effect.provide(layersFor(handler)))
+
+        const body = yield* getRequestBody(captured!)
+        const assistant = body.messages.find((m: any) => m.role === "assistant")
+        assert.deepStrictEqual(assistant.content, [{ text: "Answer" }])
       }))
 
     const toolResponse = (request: HttpClientRequest.HttpClientRequest, content: ReadonlyArray<unknown>) =>
@@ -473,7 +660,7 @@ describe("AmazonBedrockLanguageModel", () => {
           eventFrame("messageStart", { role: "assistant" }),
           eventFrame("contentBlockDelta", {
             contentBlockIndex: 0,
-            delta: { reasoningContent: { text: "thinking" } }
+            delta: { citation: { title: "source" } }
           }),
           eventFrame("contentBlockDelta", { contentBlockIndex: 1, delta: { text: "Visible" } }),
           eventFrame("contentBlockStop", { contentBlockIndex: 1 }),
@@ -488,6 +675,77 @@ describe("AmazonBedrockLanguageModel", () => {
           "text-end",
           "finish"
         ])
+      }))
+
+    it.effect("streams reasoningContent deltas as reasoning parts", () =>
+      Effect.gen(function*() {
+        const frames = [
+          eventFrame("messageStart", { role: "assistant" }),
+          eventFrame("contentBlockDelta", { contentBlockIndex: 0, delta: { reasoningContent: { text: "Let me " } } }),
+          eventFrame("contentBlockDelta", { contentBlockIndex: 0, delta: { reasoningContent: { text: "think" } } }),
+          eventFrame("contentBlockDelta", {
+            contentBlockIndex: 0,
+            delta: { reasoningContent: { signature: "sig_abc" } }
+          }),
+          eventFrame("contentBlockStop", { contentBlockIndex: 0 }),
+          eventFrame("contentBlockDelta", { contentBlockIndex: 1, delta: { text: "Answer" } }),
+          eventFrame("contentBlockStop", { contentBlockIndex: 1 }),
+          eventFrame("messageStop", { stopReason: "end_turn" }),
+          eventFrame("metadata", { usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } })
+        ]
+
+        const parts = yield* streamParts(frames)
+        assert.deepStrictEqual(parts.map((part) => part.type), [
+          "response-metadata",
+          "reasoning-start",
+          "reasoning-delta",
+          "reasoning-delta",
+          "reasoning-delta",
+          "reasoning-end",
+          "text-start",
+          "text-delta",
+          "text-end",
+          "finish"
+        ])
+
+        const reasoningDeltas = parts.filter((part) => part.type === "reasoning-delta")
+        assert.deepStrictEqual(
+          reasoningDeltas.map((part) => (part as { delta: string }).delta),
+          ["Let me ", "think", ""]
+        )
+        // The signature arrives as its own delta and rides along as metadata,
+        // since a `reasoning-delta` carries no other place to put it.
+        assert.deepStrictEqual((reasoningDeltas[2] as any).metadata, {
+          amazonBedrock: { info: { type: "reasoningText", signature: "sig_abc" } }
+        })
+      }))
+
+    it.effect("streams a redacted reasoning delta as an empty reasoning part", () =>
+      Effect.gen(function*() {
+        const frames = [
+          eventFrame("messageStart", { role: "assistant" }),
+          eventFrame("contentBlockDelta", {
+            contentBlockIndex: 0,
+            delta: { reasoningContent: { redactedContent: "cmVkYWN0ZWQ=" } }
+          }),
+          eventFrame("contentBlockStop", { contentBlockIndex: 0 }),
+          eventFrame("messageStop", { stopReason: "end_turn" }),
+          eventFrame("metadata", { usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } })
+        ]
+
+        const parts = yield* streamParts(frames)
+        assert.deepStrictEqual(parts.map((part) => part.type), [
+          "response-metadata",
+          "reasoning-start",
+          "reasoning-delta",
+          "reasoning-end",
+          "finish"
+        ])
+        const delta = parts.find((part) => part.type === "reasoning-delta")
+        assert.strictEqual((delta as any).delta, "")
+        assert.deepStrictEqual((delta as any).metadata, {
+          amazonBedrock: { info: { type: "redactedContent", redactedContent: "cmVkYWN0ZWQ=" } }
+        })
       }))
 
     it.effect("surfaces in-stream exceptions as error parts", () =>
