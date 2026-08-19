@@ -51,6 +51,7 @@ import type {
   MediaSource,
   Message,
   SystemContentBlock,
+  Tool as BedrockTool,
   ToolChoice,
   ToolConfiguration
 } from "./AmazonBedrockSchema.ts"
@@ -82,6 +83,41 @@ export type Model = string & {}
  * @since 4.0.0
  */
 export type CachePoint = typeof CachePointBlock.Encoded
+
+/**
+ * Marks a tool as the end of the cacheable prefix of the tool list.
+ *
+ * **Details**
+ *
+ * Converse caches everything preceding a cache point, so annotating a tool
+ * caches that tool and every tool declared before it. Annotate the last tool to
+ * cache the whole list, or the last stable one and declare volatile tools after
+ * it. Omitting `ttl` leaves the cache lifetime to Bedrock.
+ *
+ * **Example**
+ *
+ * ```ts
+ * import { AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
+ * import { Schema } from "effect"
+ * import { Tool } from "effect/unstable/ai"
+ *
+ * const search = Tool.make("search", {
+ *   parameters: Schema.Struct({ query: Schema.String })
+ * }).annotate(AmazonBedrockLanguageModel.ToolCachePoint, { type: "default" })
+ * ```
+ *
+ * @category services
+ * @since 4.0.0
+ */
+export const ToolCachePoint = Context.Reference<CachePoint | undefined>(
+  "@effect/ai-amazon-bedrock/AmazonBedrockLanguageModel/ToolCachePoint",
+  { defaultValue: () => undefined }
+)
+
+/**
+ * Reads the cache point a tool requests, if any.
+ */
+const getToolCachePoint = (tool: Tool.Any): CachePoint | undefined => Context.get(tool.annotations, ToolCachePoint)
 
 /**
  * The provider options through which a cache point is requested.
@@ -879,7 +915,10 @@ const prepareTools: (
     return { toolConfig: undefined, nameMapper }
   }
 
-  const tools: Array<(typeof ToolConfiguration.Encoded)["tools"][number]> = []
+  const entries: Array<{
+    readonly toolSpec: NonNullable<(typeof BedrockTool.Encoded)["toolSpec"]>
+    readonly cachePoint: CachePoint | undefined
+  }> = []
   for (const tool of options.tools) {
     if (!Tool.isUserDefined(tool)) {
       const toolName = (tool as { name: string }).name
@@ -893,13 +932,25 @@ const prepareTools: (
     }
     const description = Tool.getDescription(tool)
     const json = yield* tryToolJsonSchema(tool, "prepareTools")
-    tools.push({
+    entries.push({
       toolSpec: {
         name: tool.name,
         ...(Predicate.isNotUndefined(description) ? { description } : undefined),
         inputSchema: { json: json as Record<string, unknown> }
-      }
+      },
+      cachePoint: getToolCachePoint(tool)
     })
+  }
+
+  // Converse models the tool list as a union of `toolSpec` and `cachePoint`
+  // entries, and caches everything preceding a cache point, so a tool's cache
+  // point is emitted as its own entry directly after it.
+  const tools: Array<typeof BedrockTool.Encoded> = []
+  for (const entry of entries) {
+    tools.push({ toolSpec: entry.toolSpec })
+    if (Predicate.isNotUndefined(entry.cachePoint)) {
+      tools.push({ cachePoint: entry.cachePoint })
+    }
   }
 
   let toolChoice: typeof ToolChoice.Encoded | undefined = undefined
@@ -912,7 +963,7 @@ const prepareTools: (
     toolChoice = { tool: { name: choice.tool } }
   } else {
     const allowed = new Set(choice.oneOf)
-    const filtered = tools.filter((t) => allowed.has(t.toolSpec.name))
+    const filtered = tools.filter((t) => t.toolSpec === undefined || allowed.has(t.toolSpec.name))
     tools.length = 0
     tools.push(...filtered)
     toolChoice = choice.mode === "required" ? { any: {} } : { auto: {} }

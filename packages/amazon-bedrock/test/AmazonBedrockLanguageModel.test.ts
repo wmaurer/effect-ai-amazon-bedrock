@@ -347,6 +347,13 @@ describe("AmazonBedrockLanguageModel", () => {
       GrepTool: () => Effect.succeed("match")
     })
 
+    const CachedGlobTool = GlobTool.annotate(AmazonBedrockLanguageModel.ToolCachePoint, { type: "default" })
+    const cachedToolkit = Toolkit.make(CachedGlobTool, GrepTool)
+    const cachedToolkitLayer = cachedToolkit.toLayer({
+      GlobTool: () => Effect.succeed("found.ts"),
+      GrepTool: () => Effect.succeed("match")
+    })
+
     it.effect("encodes user tools into toolConfig.tools", () =>
       Effect.gen(function*() {
         let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
@@ -549,6 +556,47 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(body.toolConfig.tools.length, 1)
         assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "GlobTool")
         assert.isDefined(body.toolConfig.toolChoice.auto)
+      }))
+
+    it.effect("emits a cachePoint entry after an annotated tool only", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(toolResponse(request, [{ text: "ok" }]))
+        }
+
+        yield* LanguageModel.generateText({ prompt: "x", toolkit: cachedToolkit }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(cachedToolkitLayer)
+        )
+
+        const body = yield* getRequestBody(captured!)
+        assert.strictEqual(body.toolConfig.tools.length, 3)
+        assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "GlobTool")
+        assert.deepStrictEqual(body.toolConfig.tools[1], { cachePoint: { type: "default" } })
+        assert.strictEqual(body.toolConfig.tools[2].toolSpec.name, "GrepTool")
+        assert.isUndefined(body.toolConfig.tools[2].cachePoint)
+      }))
+
+    it.effect("carries the cache point ttl into the request", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(toolResponse(request, [{ text: "ok" }]))
+        }
+
+        const ttlTool = GlobTool.annotate(AmazonBedrockLanguageModel.ToolCachePoint, { type: "default", ttl: "1h" })
+        const ttlToolkit = Toolkit.make(ttlTool)
+
+        yield* LanguageModel.generateText({ prompt: "x", toolkit: ttlToolkit }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(ttlToolkit.toLayer({ GlobTool: () => Effect.succeed("found.ts") }))
+        )
+
+        const body = yield* getRequestBody(captured!)
+        assert.deepStrictEqual(body.toolConfig.tools[1], { cachePoint: { type: "default", ttl: "1h" } })
       }))
 
     const fileResponse = (request: HttpClientRequest.HttpClientRequest) =>
