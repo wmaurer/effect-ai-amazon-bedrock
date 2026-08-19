@@ -579,6 +579,8 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.isUndefined(body.toolConfig.tools[2].cachePoint)
       }))
 
+    // Asserts the end-to-end result; passes today via core's pre-filter, so it's
+    // not a red-first test of the provider-side filter.
     it.effect("drops a filtered-out tool's cache point with the tool", () =>
       Effect.gen(function*() {
         let captured: HttpClientRequest.HttpClientRequest | undefined = undefined

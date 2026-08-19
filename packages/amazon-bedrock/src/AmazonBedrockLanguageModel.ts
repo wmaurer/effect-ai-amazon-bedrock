@@ -951,6 +951,11 @@ const prepareTools: (
   } else if ("tool" in choice) {
     toolChoice = { tool: { name: choice.tool } }
   } else {
+    // `LanguageModel` (effect/unstable/ai/LanguageModel.ts:1154 for generateText,
+    // :1431 for streamText) already filters the toolkit by `toolChoice.oneOf`
+    // before a provider sees it, so on that path this is a no-op. It's defence
+    // for `prepareTools`' own contract: it keeps each tool's cache point with
+    // the tool it follows.
     const allowed = new Set(choice.oneOf)
     const filtered = entries.filter((e) => allowed.has(e.toolSpec.name))
     entries.length = 0
