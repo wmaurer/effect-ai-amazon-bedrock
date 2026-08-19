@@ -707,6 +707,71 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(content[1].document.format, "csv")
       }))
 
+    it.effect("sends a text document as a text source", () =>
+      Effect.gen(function*() {
+        // "aGVsbG8gd29ybGQ=" is base64 for "hello world"; string file part data
+        // is base64 per the `Prompt.FilePart` contract.
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", {
+            mediaType: "text/plain",
+            fileName: "notes.txt",
+            data: "aGVsbG8gd29ybGQ="
+          })
+        ])
+
+        assert.deepStrictEqual(content, [{
+          document: { format: "txt", name: "notes", source: { text: "hello world" } }
+        }])
+      }))
+
+    it.effect("decodes Uint8Array data for a text document as utf-8", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", {
+            mediaType: "text/markdown",
+            fileName: "readme.md",
+            data: new TextEncoder().encode("# Title")
+          })
+        ])
+
+        assert.deepStrictEqual(content, [{
+          document: { format: "md", name: "readme", source: { text: "# Title" } }
+        }])
+      }))
+
+    it.effect("keeps a binary document as a bytes source", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", { mediaType: "application/pdf", data: new Uint8Array([1, 2, 3]) })
+        ])
+
+        assert.deepStrictEqual(content[0].document.source, { bytes: "AQID" })
+      }))
+
+    it.effect("keeps an s3 text document as an s3Location source", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", { mediaType: "text/csv", data: new URL("s3://bucket/rows.csv") })
+        ])
+
+        assert.deepStrictEqual(content[0].document.source, {
+          s3Location: { uri: "s3://bucket/rows.csv" }
+        })
+      }))
+
+    it.effect("fails on text document data that is not base64", () =>
+      Effect.gen(function*() {
+        const error = yield* Effect.flip(
+          captureUserContent([
+            Prompt.makePart("file", { mediaType: "text/plain", fileName: "notes.txt", data: "not base64!!" })
+          ])
+        )
+
+        assert.strictEqual((error as any).reason._tag, "InvalidUserInputError")
+        assert.include((error as any).message, "notes")
+        assert.include((error as any).message, "text/plain")
+      }))
+
     it.effect("encodes an s3 file url as an s3Location source", () =>
       Effect.gen(function*() {
         const content = yield* captureUserContent([

@@ -25,6 +25,7 @@ import * as Encoding from "effect/Encoding"
 import { dual } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
 import type * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
 import * as Stream from "effect/Stream"
@@ -47,6 +48,7 @@ import type {
   ConverseResponse,
   ConverseResponseStreamEvent,
   DocumentBlock,
+  DocumentSource,
   ImageBlock,
   MediaSource,
   Message,
@@ -661,6 +663,47 @@ const fileSource: (
 })
 
 /**
+ * Resolves file part data into a Converse document source.
+ *
+ * **Details**
+ *
+ * A textual document travels as `text` rather than base64 `bytes`: base64
+ * inflates the payload by about a third, and Converse accepts the plain
+ * string. That applies only to inline data - an s3 location stays a reference,
+ * and a binary format like pdf stays base64. `Prompt.FilePart` string data is
+ * base64, so it is decoded rather than forwarded; invalid base64 fails here
+ * instead of drawing an opaque 400 from Bedrock.
+ */
+const documentSource: (
+  mediaType: string,
+  name: string,
+  data: typeof Prompt.FilePart.Type["data"]
+) => Effect.Effect<typeof DocumentSource.Encoded, AiError.AiError> = Effect.fnUntraced(
+  function*(mediaType, name, data) {
+    const source = yield* fileSource(data)
+    // `bytes` is undefined for an s3 location, which stays a reference.
+    if (!mediaType.startsWith("text/") || Predicate.isUndefined(source.bytes)) {
+      return source
+    }
+    if (typeof data !== "string") {
+      return { text: new TextDecoder().decode(data as Uint8Array) }
+    }
+    const decoded = Encoding.decodeBase64String(data)
+    if (Result.isFailure(decoded)) {
+      return yield* AiError.make({
+        module: "AmazonBedrockLanguageModel",
+        method: "prepareMessages",
+        reason: new AiError.InvalidUserInputError({
+          description:
+            `Invalid base64 data for document '${name}' of media type '${mediaType}' - string file part data must be base64`
+        })
+      })
+    }
+    return { text: decoded.success }
+  }
+)
+
+/**
  * Bedrock only accepts alphanumerics, single runs of whitespace, hyphens,
  * parentheses and square brackets in a document name, so anything else is
  * folded into a space. The file extension is dropped because the format is
@@ -742,7 +785,7 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                         document: {
                           format: documentFormat,
                           name,
-                          source: yield* fileSource(part.data),
+                          source: yield* documentSource(part.mediaType, name, part.data),
                           ...(Predicate.isNullish(citations) ? {} : { citations })
                         }
                       })
