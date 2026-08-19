@@ -139,12 +139,17 @@ export const ReasoningContentBlock = Schema.Struct({
  * content it should cover. `ttl` opts into extended caching; when omitted
  * Bedrock uses the default lifetime for `type`.
  *
+ * `ttl` uses `optionalKey` rather than `optional`: this block's encoded type is
+ * surfaced through the `Prompt` provider options, whose values must satisfy
+ * `Schema.Json`, and `Json` admits a missing key but not an explicit
+ * `undefined`.
+ *
  * @category schemas
  * @since 4.0.0
  */
 export class CachePointBlock extends Schema.Class<CachePointBlock>(makeIdentifier("CachePointBlock"))({
   type: Schema.Literal("default"),
-  ttl: Schema.optional(Schema.Literals(["5m", "1h"]))
+  ttl: Schema.optionalKey(Schema.Literals(["5m", "1h"]))
 }) {}
 
 /**
