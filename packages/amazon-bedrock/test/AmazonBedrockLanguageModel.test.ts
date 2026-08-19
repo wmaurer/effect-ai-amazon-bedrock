@@ -579,6 +579,28 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.isUndefined(body.toolConfig.tools[2].cachePoint)
       }))
 
+    it.effect("drops a filtered-out tool's cache point with the tool", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(toolResponse(request, [{ text: "ok" }]))
+        }
+
+        yield* LanguageModel.generateText({
+          prompt: "x",
+          toolkit: cachedToolkit,
+          toolChoice: { oneOf: ["GrepTool"] }
+        }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(cachedToolkitLayer)
+        )
+
+        const body = yield* getRequestBody(captured!)
+        assert.strictEqual(body.toolConfig.tools.length, 1)
+        assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "GrepTool")
+      }))
+
     it.effect("carries the cache point ttl into the request", () =>
       Effect.gen(function*() {
         let captured: HttpClientRequest.HttpClientRequest | undefined = undefined

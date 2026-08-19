@@ -942,6 +942,22 @@ const prepareTools: (
     })
   }
 
+  let toolChoice: typeof ToolChoice.Encoded | undefined = undefined
+  const choice = options.toolChoice
+  if (choice === "auto") {
+    toolChoice = { auto: {} }
+  } else if (choice === "required") {
+    toolChoice = { any: {} }
+  } else if ("tool" in choice) {
+    toolChoice = { tool: { name: choice.tool } }
+  } else {
+    const allowed = new Set(choice.oneOf)
+    const filtered = entries.filter((e) => allowed.has(e.toolSpec.name))
+    entries.length = 0
+    entries.push(...filtered)
+    toolChoice = choice.mode === "required" ? { any: {} } : { auto: {} }
+  }
+
   // Converse models the tool list as a union of `toolSpec` and `cachePoint`
   // entries, and caches everything preceding a cache point, so a tool's cache
   // point is emitted as its own entry directly after it.
@@ -953,26 +969,11 @@ const prepareTools: (
     }
   }
 
-  let toolChoice: typeof ToolChoice.Encoded | undefined = undefined
-  const choice = options.toolChoice
-  if (choice === "auto") {
-    toolChoice = { auto: {} }
-  } else if (choice === "required") {
-    toolChoice = { any: {} }
-  } else if ("tool" in choice) {
-    toolChoice = { tool: { name: choice.tool } }
-  } else {
-    const allowed = new Set(choice.oneOf)
-    const filtered = tools.filter((t) => t.toolSpec === undefined || allowed.has(t.toolSpec.name))
-    tools.length = 0
-    tools.push(...filtered)
-    toolChoice = choice.mode === "required" ? { any: {} } : { auto: {} }
-  }
-
   // Bedrock's Converse API rejects an empty `tools` array alongside a
-  // `toolChoice`, so when tool selection filters everything out (e.g. an
-  // `oneOf` that matches no tools) we omit `toolConfig` entirely.
-  const toolConfig: typeof ToolConfiguration.Encoded | undefined = tools.length > 0
+  // `toolChoice`, and a lone cache point covers nothing, so when tool selection
+  // filters every tool out (e.g. an `oneOf` that matches no tools) we omit
+  // `toolConfig` entirely.
+  const toolConfig: typeof ToolConfiguration.Encoded | undefined = entries.length > 0
     ? { tools, ...(Predicate.isNotUndefined(toolChoice) ? { toolChoice } : undefined) }
     : undefined
 
