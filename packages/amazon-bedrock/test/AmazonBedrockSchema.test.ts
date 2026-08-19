@@ -78,4 +78,20 @@ describe("AmazonBedrockSchema", () => {
       )
       assert.deepStrictEqual(encoded.toolConfig?.tools[1], { cachePoint: { type: "default", ttl: "1h" } })
     }))
+
+  it.effect("round-trips a document block carrying a text source", () =>
+    Effect.gen(function*() {
+      const encoded = yield* Schema.encodeEffect(AmazonBedrockSchema.DocumentBlock)(
+        new AmazonBedrockSchema.DocumentBlock({
+          format: "txt",
+          name: "notes",
+          source: { text: "hello world" }
+        })
+      )
+      assert.deepStrictEqual(encoded.source, { text: "hello world" })
+
+      const decoded = yield* Schema.decodeUnknownEffect(AmazonBedrockSchema.DocumentBlock)(encoded)
+      assert.strictEqual(decoded.source.text, "hello world")
+      assert.isUndefined(decoded.source.bytes)
+    }))
 })

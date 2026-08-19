@@ -181,6 +181,25 @@ export const MediaSource = Schema.Struct({
 })
 
 /**
+ * The source of a document content block.
+ *
+ * **Details**
+ *
+ * `DocumentSource` is a Smithy union, so every member is optional here. It
+ * adds `text` to the `bytes` / `s3Location` pair `MediaSource` carries: a
+ * textual document travels as a plain string rather than base64, which is
+ * about a quarter smaller on the wire. The union's fourth member, `content`,
+ * is not modelled.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const DocumentSource = Schema.Struct({
+  ...MediaSource.fields,
+  text: Schema.optional(Schema.String)
+})
+
+/**
  * An image content block.
  *
  * @category schemas
@@ -220,7 +239,7 @@ export class CitationsConfig extends Schema.Class<CitationsConfig>(makeIdentifie
 export class DocumentBlock extends Schema.Class<DocumentBlock>(makeIdentifier("DocumentBlock"))({
   format: Schema.Literals(["pdf", "csv", "doc", "docx", "xls", "xlsx", "html", "txt", "md"]),
   name: Schema.String,
-  source: MediaSource,
+  source: DocumentSource,
   citations: Schema.optional(CitationsConfig)
 }) {}
 
