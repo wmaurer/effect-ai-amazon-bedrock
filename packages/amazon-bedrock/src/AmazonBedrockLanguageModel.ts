@@ -672,7 +672,9 @@ const fileSource: (
  * string. That applies only to inline data - an s3 location stays a reference,
  * and a binary format like pdf stays base64. `Prompt.FilePart` string data is
  * base64, so it is decoded rather than forwarded; invalid base64 fails here
- * instead of drawing an opaque 400 from Bedrock.
+ * instead of drawing an opaque 400 from Bedrock. Decoding assumes UTF-8; text
+ * with a different encoding becomes U+FFFD replacement characters rather than
+ * an error.
  */
 const documentSource: (
   mediaType: string,
@@ -685,10 +687,10 @@ const documentSource: (
     if (!mediaType.startsWith("text/") || Predicate.isUndefined(source.bytes)) {
       return source
     }
-    if (typeof data !== "string") {
-      return { text: new TextDecoder().decode(data as Uint8Array) }
+    if (data instanceof Uint8Array) {
+      return { text: new TextDecoder().decode(data) }
     }
-    const decoded = Encoding.decodeBase64String(data)
+    const decoded = Encoding.decodeBase64String(data as string)
     if (Result.isFailure(decoded)) {
       return yield* AiError.make({
         module: "AmazonBedrockLanguageModel",
