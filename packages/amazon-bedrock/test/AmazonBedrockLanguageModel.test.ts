@@ -620,6 +620,7 @@ describe("AmazonBedrockLanguageModel", () => {
         )
 
         const body = yield* getRequestBody(captured!)
+        assert.strictEqual(body.toolConfig.tools.length, 2)
         assert.deepStrictEqual(body.toolConfig.tools[1], { cachePoint: { type: "default", ttl: "1h" } })
       }))
 

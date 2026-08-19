@@ -92,7 +92,10 @@ export type CachePoint = typeof CachePointBlock.Encoded
  * Converse caches everything preceding a cache point, so annotating a tool
  * caches that tool and every tool declared before it. Annotate the last tool to
  * cache the whole list, or the last stable one and declare volatile tools after
- * it. Omitting `ttl` leaves the cache lifetime to Bedrock.
+ * it. Omitting `ttl` leaves the cache lifetime to Bedrock. Bedrock also limits
+ * how many cache checkpoints a single request may carry across `system`,
+ * `messages`, and `tools` combined, so annotate the tool at the end of the
+ * cacheable prefix rather than every tool in the toolkit.
  *
  * **Example**
  *
@@ -951,11 +954,11 @@ const prepareTools: (
   } else if ("tool" in choice) {
     toolChoice = { tool: { name: choice.tool } }
   } else {
-    // `LanguageModel` (effect/unstable/ai/LanguageModel.ts:1154 for generateText,
-    // :1431 for streamText) already filters the toolkit by `toolChoice.oneOf`
-    // before a provider sees it, so on that path this is a no-op. It's defence
-    // for `prepareTools`' own contract: it keeps each tool's cache point with
-    // the tool it follows.
+    // `generateText` and `streamText` in `effect/unstable/ai/LanguageModel`
+    // already filter the toolkit by `toolChoice.oneOf` before a provider sees
+    // it, so on that path this is a no-op. It's defence for `prepareTools`'
+    // own contract: it keeps each tool's cache point with the tool it
+    // follows.
     const allowed = new Set(choice.oneOf)
     const filtered = entries.filter((e) => allowed.has(e.toolSpec.name))
     entries.length = 0
