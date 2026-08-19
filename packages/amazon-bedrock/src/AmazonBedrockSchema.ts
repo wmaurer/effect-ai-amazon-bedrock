@@ -388,11 +388,22 @@ export class ToolSpecification extends Schema.Class<ToolSpecification>(makeIdent
 /**
  * A tool entry within a {@link ToolConfiguration}.
  *
+ * **Details**
+ *
+ * Converse models this as a union: an entry is either a `toolSpec` describing a
+ * callable tool, or a `cachePoint` marking the end of the cacheable prefix of
+ * the tool list. Like every AWS union in this module, it is modelled as a
+ * struct whose members are all optional.
+ *
+ * The union's third member, `systemTool`, selects a Bedrock-hosted tool this
+ * provider cannot invoke, and is not modelled.
+ *
  * @category schemas
  * @since 4.0.0
  */
 export class Tool extends Schema.Class<Tool>(makeIdentifier("Tool"))({
-  toolSpec: ToolSpecification
+  toolSpec: Schema.optional(ToolSpecification),
+  cachePoint: Schema.optional(CachePointBlock)
 }) {}
 
 /**

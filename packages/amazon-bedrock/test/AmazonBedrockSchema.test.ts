@@ -51,7 +51,31 @@ describe("AmazonBedrockSchema", () => {
           })
         })
       )
-      assert.strictEqual(encoded.toolConfig?.tools[0]?.toolSpec.name, "GlobTool")
+      assert.strictEqual(encoded.toolConfig?.tools[0]?.toolSpec?.name, "GlobTool")
       assert.isDefined(encoded.toolConfig && (encoded.toolConfig.toolChoice as { auto?: unknown })?.auto)
+    }))
+
+  it.effect("encodes a cachePoint entry in toolConfig.tools", () =>
+    Effect.gen(function*() {
+      const encoded = yield* Schema.encodeEffect(AmazonBedrockSchema.ConverseRequest)(
+        new AmazonBedrockSchema.ConverseRequest({
+          modelId: "m",
+          messages: [],
+          toolConfig: new AmazonBedrockSchema.ToolConfiguration({
+            tools: [
+              new AmazonBedrockSchema.Tool({
+                toolSpec: new AmazonBedrockSchema.ToolSpecification({
+                  name: "GlobTool",
+                  inputSchema: { json: { type: "object" } }
+                })
+              }),
+              new AmazonBedrockSchema.Tool({
+                cachePoint: new AmazonBedrockSchema.CachePointBlock({ type: "default", ttl: "1h" })
+              })
+            ]
+          })
+        })
+      )
+      assert.deepStrictEqual(encoded.toolConfig?.tools[1], { cachePoint: { type: "default", ttl: "1h" } })
     }))
 })
