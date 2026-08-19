@@ -12,7 +12,9 @@
  * document file parts are converted into Converse `image` / `document` blocks;
  * a media type Converse does not accept fails loudly with
  * `AiError.InvalidUserInputError` rather than silently dropping content. Prompt
- * caching is opt-in per message or per part via provider options.
+ * caching is opt-in per message or per part via provider options. Citations
+ * are opt-in per document, and the citation blocks and deltas Converse returns
+ * are surfaced as document source parts.
  *
  * @since 4.0.0
  */
@@ -29,7 +31,7 @@ import * as Stream from "effect/Stream"
 import type { Mutable, Simplify } from "effect/Types"
 import * as AiError from "effect/unstable/ai/AiError"
 import { toCodecAnthropic } from "effect/unstable/ai/AnthropicStructuredOutput"
-import type * as IdGenerator from "effect/unstable/ai/IdGenerator"
+import * as IdGenerator from "effect/unstable/ai/IdGenerator"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import * as AiModel from "effect/unstable/ai/Model"
 import type * as Prompt from "effect/unstable/ai/Prompt"
@@ -38,6 +40,8 @@ import * as Tool from "effect/unstable/ai/Tool"
 import { AmazonBedrockClient } from "./AmazonBedrockClient.ts"
 import type {
   CachePointBlock,
+  Citation,
+  CitationsConfig,
   ContentBlock,
   ConverseRequest,
   ConverseResponse,
@@ -134,14 +138,6 @@ declare module "effect/unstable/ai/Prompt" {
   export interface TextPartOptions extends CachePointOptions {}
 
   /**
-   * Amazon Bedrock options for file prompt parts.
-   *
-   * @category models
-   * @since 4.0.0
-   */
-  export interface FilePartOptions extends CachePointOptions {}
-
-  /**
    * Amazon Bedrock options for tool call prompt parts.
    *
    * @category models
@@ -177,6 +173,148 @@ const pushCachePoint = (
     content.push({ cachePoint })
   }
 }
+
+// =============================================================================
+// Citations
+// =============================================================================
+
+/**
+ * Requests that a document be citable.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export type Citations = typeof CitationsConfig.Encoded
+
+/**
+ * The provider options carried by a file prompt part.
+ *
+ * **Details**
+ *
+ * File parts are the only prompt parts that can request citations, so they
+ * carry both the cache point every part accepts and the citations config.
+ */
+interface FileOptions {
+  readonly amazonBedrock?: {
+    /**
+     * Marks the end of the reusable prefix of the request. The cache point is
+     * emitted after the block this is attached to.
+     */
+    readonly cachePoint?: CachePoint | null
+    /**
+     * Opts the document into citations. Ignored for image file parts, which
+     * Converse cannot cite.
+     */
+    readonly citations?: Citations | null
+  } | null
+}
+
+declare module "effect/unstable/ai/Prompt" {
+  /**
+   * Amazon Bedrock options for file prompt parts.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface FilePartOptions extends FileOptions {}
+}
+
+declare module "effect/unstable/ai/Response" {
+  /**
+   * Amazon Bedrock metadata for a document citation.
+   *
+   * **Details**
+   *
+   * `location` names the unit `start` and `end` are counted in, and
+   * `citedText` is the source text Converse reported for the cited span.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface DocumentSourcePartMetadata extends ProviderMetadata {
+    readonly amazonBedrock?: {
+      readonly location: "documentChar" | "documentPage" | "documentChunk"
+      readonly citedText: string
+      readonly start: number | null
+      readonly end: number | null
+      readonly source: string | null
+    } | null
+  }
+}
+
+/**
+ * A document sent in the request.
+ *
+ * **Details**
+ *
+ * Citation locations carry a `documentIndex` into the documents of the request
+ * in the order they were sent, so the list is built while encoding the prompt
+ * and used to resolve the cited document.
+ */
+interface CitedDocument {
+  readonly name: string
+  readonly mediaType: string
+  readonly fileName: string | undefined
+}
+
+/** The `CitationLocation` members this provider models, in the order tried. */
+const citationLocations = ["documentChar", "documentPage", "documentChunk"] as const
+
+/**
+ * Converts a citation into a document source part.
+ *
+ * **Details**
+ *
+ * Returns `undefined` for a citation that cannot be attributed to a document
+ * this request sent: `web` and `searchResultLocation` citations accompany
+ * search results the provider cannot send, and an out-of-range `documentIndex`
+ * has no document to name. Both are dropped rather than reported against the
+ * wrong file. `CitationsDelta` repeats the fields of `Citation`, so the
+ * streaming path shares this conversion.
+ */
+const citationSource: (
+  citation: typeof Citation.Encoded,
+  documents: ReadonlyArray<CitedDocument>,
+  idGenerator: IdGenerator.Service
+) => Effect.Effect<
+  Response.DocumentSourcePartEncoded | undefined
+> = Effect.fnUntraced(function*(citation, documents, idGenerator) {
+  const location = citation.location
+  if (Predicate.isUndefined(location)) {
+    return undefined
+  }
+  for (const kind of citationLocations) {
+    const span = location[kind]
+    if (Predicate.isUndefined(span)) {
+      continue
+    }
+    const document = Predicate.isUndefined(span.documentIndex) ? undefined : documents[span.documentIndex]
+    if (Predicate.isUndefined(document)) {
+      return undefined
+    }
+    const id = yield* idGenerator.generateId()
+    return {
+      type: "source",
+      sourceType: "document",
+      id,
+      mediaType: document.mediaType,
+      // The document block name is the only title Converse was given, so it is
+      // the fallback when the citation does not repeat one.
+      title: citation.title ?? document.name,
+      ...(Predicate.isUndefined(document.fileName) ? {} : { fileName: document.fileName }),
+      metadata: {
+        amazonBedrock: {
+          location: kind,
+          citedText: (citation.sourceContent ?? []).map((content) => content.text ?? "").join(""),
+          start: span.start ?? null,
+          end: span.end ?? null,
+          source: citation.source ?? null
+        }
+      }
+    }
+  }
+  return undefined
+})
 
 // =============================================================================
 // Reasoning
@@ -335,10 +473,11 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
     ): Effect.fn.Return<{
       readonly request: typeof ConverseRequest.Encoded
       readonly nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>
+      readonly documents: ReadonlyArray<CitedDocument>
     }, AiError.AiError> {
       const services = yield* Effect.context<never>()
       const config = { modelId: model, ...providerConfig, ...services.mapUnsafe.get(Config.key) }
-      const { messages, system } = yield* prepareMessages(options)
+      const { documents, messages, system } = yield* prepareMessages(options)
       const { nameMapper, toolConfig } = yield* prepareTools(options)
       const responseFormat = options.responseFormat
 
@@ -368,21 +507,21 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
           ? { toolConfig }
           : {})
       }
-      return { request, nameMapper }
+      return { request, nameMapper, documents }
     }
   )
 
   return yield* LanguageModel.make({
     codecTransformer: toCodecAnthropic,
     generateText: Effect.fnUntraced(function*(options) {
-      const { nameMapper, request } = yield* makeRequest(options)
+      const { documents, nameMapper, request } = yield* makeRequest(options)
       const rawResponse = yield* client.converse({ payload: request })
-      return yield* makeResponse(request, rawResponse, options, nameMapper)
+      return yield* makeResponse(request, rawResponse, options, nameMapper, documents)
     }),
     streamText: Effect.fnUntraced(function*(options) {
-      const { nameMapper, request } = yield* makeRequest(options)
+      const { documents, nameMapper, request } = yield* makeRequest(options)
       const stream = client.converseStream({ payload: request })
-      return yield* makeStreamResponse(request, stream, nameMapper)
+      return yield* makeStreamResponse(request, stream, nameMapper, documents)
     }, (effect, _options) => effect.pipe(Stream.unwrap))
   })
 })
@@ -501,6 +640,7 @@ const documentName = (fileName: string | undefined, position: number): string =>
 const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect<{
   readonly system: ReadonlyArray<typeof SystemContentBlock.Encoded>
   readonly messages: ReadonlyArray<typeof Message.Encoded>
+  readonly documents: ReadonlyArray<CitedDocument>
 }, AiError.AiError> = Effect.fnUntraced(
   function*(options) {
     const groups = groupMessages(options.prompt)
@@ -508,8 +648,9 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
     const system: Array<typeof SystemContentBlock.Encoded> = []
     const messages: Array<typeof Message.Encoded> = []
     // Document names must be present and distinct within a request, so unnamed
-    // documents are numbered across the whole conversation.
-    let documentCount = 0
+    // documents are numbered across the whole conversation. The documents are
+    // also collected in order, because citations index into them.
+    const documents: Array<CitedDocument> = []
 
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i]!
@@ -555,12 +696,15 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                     }
                     const documentFormat = documentFormats[part.mediaType]
                     if (Predicate.isNotUndefined(documentFormat)) {
-                      documentCount = documentCount + 1
+                      const name = documentName(part.fileName, documents.length + 1)
+                      const citations = part.options.amazonBedrock?.citations
+                      documents.push({ name, mediaType: part.mediaType, fileName: part.fileName })
                       content.push({
                         document: {
                           format: documentFormat,
-                          name: documentName(part.fileName, documentCount),
-                          source: yield* fileSource(part.data)
+                          name,
+                          source: yield* fileSource(part.data),
+                          ...(Predicate.isNullish(citations) ? {} : { citations })
                         }
                       })
                       pushCachePoint(content, part)
@@ -690,7 +834,7 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
       }
     }
 
-    return { system, messages }
+    return { system, messages, documents }
   }
 )
 
@@ -792,12 +936,14 @@ const makeResponse: (
   request: typeof ConverseRequest.Encoded,
   response: ConverseResponse,
   options: LanguageModel.ProviderOptions,
-  nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>
+  nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>,
+  documents: ReadonlyArray<CitedDocument>
 ) => Effect.Effect<
   Array<Response.PartEncoded>,
   never,
   IdGenerator.IdGenerator
-> = Effect.fnUntraced(function*(request, response, options, nameMapper) {
+> = Effect.fnUntraced(function*(request, response, options, nameMapper, documents) {
+  const idGenerator = yield* IdGenerator.IdGenerator
   const parts: Array<Response.PartEncoded> = []
 
   parts.push({
@@ -859,9 +1005,25 @@ const makeResponse: (
           })
         })
       }
+    } else if (Predicate.isNotUndefined(part.citationsContent)) {
+      // Once a document has citations enabled the answer text arrives inside
+      // this block instead of a plain `text` block, so it is emitted here too.
+      if (options.responseFormat.type === "text") {
+        for (const generated of part.citationsContent.content ?? []) {
+          if (Predicate.isNotUndefined(generated.text)) {
+            parts.push({ type: "text", text: generated.text })
+          }
+        }
+      }
+      for (const citation of part.citationsContent.citations ?? []) {
+        const source = yield* citationSource(citation, documents, idGenerator)
+        if (Predicate.isNotUndefined(source)) {
+          parts.push(source)
+        }
+      }
     }
-    // Blocks this provider does not model (`citationsContent`, ...) decode with
-    // every field undefined and are ignored.
+    // Blocks this provider does not model (`audio`, `searchResult`, ...) decode
+    // with every field undefined and are ignored.
   }
 
   const finishReason = InternalUtilities.resolveFinishReason(response.stopReason)
@@ -895,13 +1057,17 @@ const makeResponse: (
 const makeStreamResponse: (
   request: typeof ConverseRequest.Encoded,
   stream: Stream.Stream<ConverseResponseStreamEvent, AiError.AiError>,
-  nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>
+  nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>,
+  documents: ReadonlyArray<CitedDocument>
 ) => Effect.Effect<
   Stream.Stream<Response.StreamPartEncoded, AiError.AiError>,
   never,
   IdGenerator.IdGenerator
 > = Effect.fnUntraced(
-  function*(request, stream, nameMapper) {
+  function*(request, stream, nameMapper, documents) {
+    // Acquired up front: the stream itself must not carry the requirement.
+    const idGenerator = yield* IdGenerator.IdGenerator
+
     // Tracks whether a text block at a given content-block index has been
     // started (text blocks are lazily started on first delta).
     const startedBlocks = new Set<number>()
@@ -1029,7 +1195,17 @@ const makeStreamResponse: (
               })
               break
             }
-            // Deltas this provider does not model (citation, ...) decode with
+            const citation = event.contentBlockDelta.delta.citation
+            if (Predicate.isNotUndefined(citation)) {
+              const source = yield* citationSource(citation, documents, idGenerator)
+              // A citation that cannot be attributed to a document of this
+              // request emits nothing; see `citationSource`.
+              if (Predicate.isNotUndefined(source)) {
+                parts.push(source)
+              }
+              break
+            }
+            // Deltas this provider does not model (image, ...) decode with
             // every key undefined and are skipped.
             const text = event.contentBlockDelta.delta.text
             if (Predicate.isUndefined(text)) {

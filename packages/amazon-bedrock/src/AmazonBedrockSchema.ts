@@ -187,6 +187,21 @@ export class ImageBlock extends Schema.Class<ImageBlock>(makeIdentifier("ImageBl
 }) {}
 
 /**
+ * Opts a document into citations.
+ *
+ * **Details**
+ *
+ * When enabled the model may ground its answer in the document and return
+ * `citationsContent` blocks pointing back at the spans it used.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class CitationsConfig extends Schema.Class<CitationsConfig>(makeIdentifier("CitationsConfig"))({
+  enabled: Schema.Boolean
+}) {}
+
+/**
  * A document content block.
  *
  * **Details**
@@ -200,7 +215,92 @@ export class ImageBlock extends Schema.Class<ImageBlock>(makeIdentifier("ImageBl
 export class DocumentBlock extends Schema.Class<DocumentBlock>(makeIdentifier("DocumentBlock"))({
   format: Schema.Literals(["pdf", "csv", "doc", "docx", "xls", "xlsx", "html", "txt", "md"]),
   name: Schema.String,
-  source: MediaSource
+  source: MediaSource,
+  citations: Schema.optional(CitationsConfig)
+}) {}
+
+/**
+ * A span within a cited document.
+ *
+ * **Details**
+ *
+ * Models `DocumentCharLocation`, `DocumentPageLocation` and
+ * `DocumentChunkLocation`, which are structurally identical; the enclosing
+ * `CitationLocation` member says which unit `start` and `end` are counted in.
+ * `documentIndex` indexes the documents sent in the request, in order.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class DocumentLocation extends Schema.Class<DocumentLocation>(makeIdentifier("DocumentLocation"))({
+  documentIndex: Schema.optional(Schema.Number),
+  start: Schema.optional(Schema.Number),
+  end: Schema.optional(Schema.Number)
+}) {}
+
+/**
+ * The location a citation points at.
+ *
+ * **Details**
+ *
+ * AWS models `CitationLocation` as a UNION, so every member is optional. Only
+ * the document members are modelled; `web` and `searchResultLocation` accompany
+ * search results, which this provider cannot send, and decode as undefined.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const CitationLocation = Schema.Struct({
+  documentChar: Schema.optional(DocumentLocation),
+  documentPage: Schema.optional(DocumentLocation),
+  documentChunk: Schema.optional(DocumentLocation)
+})
+
+/**
+ * A piece of text attached to a citation.
+ *
+ * **Details**
+ *
+ * Models `CitationGeneratedContent` (the answer text a citation supports),
+ * `CitationSourceContent` (the source text it was drawn from) and
+ * `CitationSourceContentDelta`, which are all a single optional `text` member.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const CitationTextContent = Schema.Struct({
+  text: Schema.optional(Schema.String)
+})
+
+/**
+ * A reference from generated content back to a source document.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class Citation extends Schema.Class<Citation>(makeIdentifier("Citation"))({
+  title: Schema.optional(Schema.String),
+  source: Schema.optional(Schema.String),
+  sourceContent: Schema.optional(Schema.Array(CitationTextContent)),
+  location: Schema.optional(CitationLocation)
+}) {}
+
+/**
+ * Generated content together with the citations backing it.
+ *
+ * **Details**
+ *
+ * Returned in place of a plain `text` block once any document in the request
+ * has citations enabled, so `content` carries the answer text itself.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class CitationsContentBlock extends Schema.Class<CitationsContentBlock>(
+  makeIdentifier("CitationsContentBlock")
+)({
+  content: Schema.optional(Schema.Array(CitationTextContent)),
+  citations: Schema.optional(Schema.Array(Citation))
 }) {}
 
 /**
@@ -225,7 +325,8 @@ export const ContentBlock = Schema.Struct({
   reasoningContent: Schema.optional(ReasoningContentBlock),
   image: Schema.optional(ImageBlock),
   document: Schema.optional(DocumentBlock),
-  cachePoint: Schema.optional(CachePointBlock)
+  cachePoint: Schema.optional(CachePointBlock),
+  citationsContent: Schema.optional(CitationsContentBlock)
 })
 
 /**
@@ -424,15 +525,33 @@ export const ReasoningContentBlockDelta = Schema.Struct({
 })
 
 /**
+ * The citation member of a streaming content-block delta.
+ *
+ * **Details**
+ *
+ * `CitationsDelta` repeats the fields of `Citation`; Converse sends one whole
+ * citation per delta rather than splitting a single citation across several.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export class CitationsDelta extends Schema.Class<CitationsDelta>(makeIdentifier("CitationsDelta"))({
+  title: Schema.optional(Schema.String),
+  source: Schema.optional(Schema.String),
+  sourceContent: Schema.optional(Schema.Array(CitationTextContent)),
+  location: Schema.optional(CitationLocation)
+}) {}
+
+/**
  * A delta within a streaming content block.
  *
  * **Details**
  *
  * AWS models `ContentBlockDelta` as a UNION whose members (`text`, `toolUse`,
  * `reasoningContent`, `citation`, ...) are all optional. Every member is
- * optional here so a delta this provider does not model (e.g. a citation) does
- * not fail the union decode and truncate the stream; the language model skips
- * such deltas.
+ * optional here so a delta this provider does not model (e.g. an image delta)
+ * does not fail the union decode and truncate the stream; the language model
+ * skips such deltas.
  *
  * @category schemas
  * @since 4.0.0
@@ -440,7 +559,8 @@ export const ReasoningContentBlockDelta = Schema.Struct({
 export const ContentBlockDelta = Schema.Struct({
   text: Schema.optional(Schema.String),
   toolUse: Schema.optional(ToolUseBlockDelta),
-  reasoningContent: Schema.optional(ReasoningContentBlockDelta)
+  reasoningContent: Schema.optional(ReasoningContentBlockDelta),
+  citation: Schema.optional(CitationsDelta)
 })
 
 /**

@@ -802,6 +802,127 @@ describe("AmazonBedrockLanguageModel", () => {
         const assistant = body.messages.find((m: any) => m.role === "assistant")
         assert.deepStrictEqual(assistant.content[1], { cachePoint: { type: "default" } })
       }))
+
+    const citedDocument = Prompt.makePart("file", {
+      mediaType: "application/pdf",
+      fileName: "report.pdf",
+      data: "AQID",
+      options: { amazonBedrock: { citations: { enabled: true } } }
+    })
+
+    it.effect("enables citations on a document block when requested", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([citedDocument])
+
+        assert.deepStrictEqual(content, [{
+          document: {
+            format: "pdf",
+            name: "report",
+            source: { bytes: "AQID" },
+            citations: { enabled: true }
+          }
+        }])
+      }))
+
+    const generateWithDocument = (content: ReadonlyArray<unknown>) =>
+      LanguageModel.generateText({
+        prompt: Prompt.fromMessages([
+          Prompt.makeMessage("user", {
+            content: [citedDocument, Prompt.makePart("text", { text: "Summarize" })]
+          })
+        ])
+      }).pipe(
+        Effect.provide(layersFor((request) =>
+          Effect.succeed(jsonResponse(request, {
+            output: { message: { role: "assistant", content } },
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            stopReason: "end_turn"
+          }))
+        ))
+      )
+
+    const sourceParts = (parts: ReadonlyArray<{ readonly type: string }>): Array<any> =>
+      parts.filter((part) => part.type === "source") as Array<any>
+
+    it.effect("decodes a citationsContent block into text and a document source", () =>
+      Effect.gen(function*() {
+        const response = yield* generateWithDocument([{
+          citationsContent: {
+            content: [{ text: "Revenue grew 12%." }],
+            citations: [{
+              title: "Q3 revenue",
+              source: "s3://reports/q3.pdf",
+              sourceContent: [{ text: "revenue increased by 12 percent" }],
+              location: { documentChar: { documentIndex: 0, start: 100, end: 140 } }
+            }]
+          }
+        }])
+
+        assert.strictEqual(response.text, "Revenue grew 12%.")
+
+        const sources = sourceParts(response.content)
+        assert.strictEqual(sources.length, 1)
+        assert.strictEqual(sources[0].sourceType, "document")
+        assert.strictEqual(sources[0].title, "Q3 revenue")
+        assert.strictEqual(sources[0].mediaType, "application/pdf")
+        assert.strictEqual(sources[0].fileName, "report.pdf")
+        assert.isString(sources[0].id)
+        assert.deepStrictEqual(sources[0].metadata.amazonBedrock, {
+          location: "documentChar",
+          citedText: "revenue increased by 12 percent",
+          start: 100,
+          end: 140,
+          source: "s3://reports/q3.pdf"
+        })
+      }))
+
+    it.effect("falls back to the document name when a citation carries no title", () =>
+      Effect.gen(function*() {
+        const response = yield* generateWithDocument([{
+          citationsContent: {
+            content: [{ text: "Revenue grew." }],
+            citations: [{ location: { documentPage: { documentIndex: 0, start: 4, end: 5 } } }]
+          }
+        }])
+
+        const sources = sourceParts(response.content)
+        assert.strictEqual(sources.length, 1)
+        // The document block name Converse was sent, with the extension dropped.
+        assert.strictEqual(sources[0].title, "report")
+        assert.deepStrictEqual(sources[0].metadata.amazonBedrock, {
+          location: "documentPage",
+          citedText: "",
+          start: 4,
+          end: 5,
+          source: null
+        })
+      }))
+
+    it.effect("keeps the generated text when a citation references an unknown document", () =>
+      Effect.gen(function*() {
+        const response = yield* generateWithDocument([{
+          citationsContent: {
+            content: [{ text: "Revenue grew." }],
+            citations: [{ location: { documentChar: { documentIndex: 7, start: 1, end: 2 } } }]
+          }
+        }])
+
+        assert.strictEqual(response.text, "Revenue grew.")
+        assert.strictEqual(sourceParts(response.content).length, 0)
+      }))
+
+    it.effect("skips a citation whose location this provider does not model", () =>
+      Effect.gen(function*() {
+        const response = yield* generateWithDocument([{
+          citationsContent: {
+            content: [{ text: "Revenue grew." }],
+            citations: [{ title: "A web page", location: { web: { url: "https://example.com" } } }]
+          }
+        }])
+
+        assert.strictEqual(response.text, "Revenue grew.")
+        assert.strictEqual(sourceParts(response.content).length, 0)
+      }))
   })
 
   describe("generateObject", () => {
@@ -1181,6 +1302,67 @@ describe("AmazonBedrockLanguageModel", () => {
         )
         const body = yield* getRequestBody(captured!)
         assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "GlobTool")
+      }))
+
+    it.effect("decodes a citation delta into a document source part", () =>
+      Effect.gen(function*() {
+        const frames = [
+          eventFrame("messageStart", { role: "assistant" }),
+          eventFrame("contentBlockDelta", { contentBlockIndex: 0, delta: { text: "Revenue grew 12%." } }),
+          eventFrame("contentBlockDelta", {
+            contentBlockIndex: 0,
+            delta: {
+              citation: {
+                title: "Q3 revenue",
+                sourceContent: [{ text: "revenue increased by 12 percent" }],
+                location: { documentChar: { documentIndex: 0, start: 100, end: 140 } }
+              }
+            }
+          }),
+          eventFrame("contentBlockStop", { contentBlockIndex: 0 }),
+          eventFrame("messageStop", { stopReason: "end_turn" }),
+          eventFrame("metadata", { usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } })
+        ]
+
+        const parts = yield* LanguageModel.streamText({
+          prompt: Prompt.fromMessages([
+            Prompt.makeMessage("user", {
+              content: [
+                Prompt.makePart("file", {
+                  mediaType: "application/pdf",
+                  fileName: "report.pdf",
+                  data: "AQID",
+                  options: { amazonBedrock: { citations: { enabled: true } } }
+                }),
+                Prompt.makePart("text", { text: "Summarize" })
+              ]
+            })
+          ])
+        }).pipe(
+          Stream.runCollect,
+          Effect.map((chunk) => globalThis.Array.from(chunk)),
+          Effect.provide(layersFor((request) => Effect.succeed(binaryResponse(request, concat(frames)))))
+        )
+
+        assert.deepStrictEqual(parts.map((part) => part.type), [
+          "response-metadata",
+          "text-start",
+          "text-delta",
+          "source",
+          "text-end",
+          "finish"
+        ])
+        const source = parts.find((part) => part.type === "source") as any
+        assert.strictEqual(source.sourceType, "document")
+        assert.strictEqual(source.title, "Q3 revenue")
+        assert.strictEqual(source.mediaType, "application/pdf")
+        assert.deepStrictEqual(source.metadata.amazonBedrock, {
+          location: "documentChar",
+          citedText: "revenue increased by 12 percent",
+          start: 100,
+          end: 140,
+          source: null
+        })
       }))
   })
 })
