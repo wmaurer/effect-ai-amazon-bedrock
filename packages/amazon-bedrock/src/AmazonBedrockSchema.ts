@@ -233,6 +233,11 @@ export class CitationsConfig extends Schema.Class<CitationsConfig>(makeIdentifie
  * `name` is required and Bedrock restricts it to alphanumerics, single runs of
  * whitespace, hyphens, parentheses and square brackets.
  *
+ * `context` is free text telling the model how to interpret the document. AWS
+ * documents it in terms of citations, but the model constrains it neither in
+ * length nor in alphabet and does not tie it to `citations`, so it is sent
+ * whenever it is set.
+ *
  * @category schemas
  * @since 4.0.0
  */
@@ -240,6 +245,7 @@ export class DocumentBlock extends Schema.Class<DocumentBlock>(makeIdentifier("D
   format: Schema.Literals(["pdf", "csv", "doc", "docx", "xls", "xlsx", "html", "txt", "md"]),
   name: Schema.String,
   source: DocumentSource,
+  context: Schema.optional(Schema.String),
   citations: Schema.optional(CitationsConfig)
 }) {}
 

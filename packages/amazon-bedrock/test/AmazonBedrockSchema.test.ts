@@ -94,4 +94,21 @@ describe("AmazonBedrockSchema", () => {
       assert.strictEqual(decoded.source.text, "hello world")
       assert.isUndefined(decoded.source.bytes)
     }))
+
+  it.effect("round-trips a document block carrying context", () =>
+    Effect.gen(function*() {
+      const encoded = yield* Schema.encodeEffect(AmazonBedrockSchema.DocumentBlock)(
+        new AmazonBedrockSchema.DocumentBlock({
+          format: "pdf",
+          name: "report",
+          source: { bytes: "AQID" },
+          context: "A quarterly earnings report. Prefer the tables over the prose."
+        })
+      )
+      assert.strictEqual(encoded.context, "A quarterly earnings report. Prefer the tables over the prose.")
+
+      const decoded = yield* Schema.decodeUnknownEffect(AmazonBedrockSchema.DocumentBlock)(encoded)
+      assert.strictEqual(decoded.context, "A quarterly earnings report. Prefer the tables over the prose.")
+      assert.isUndefined(decoded.citations)
+    }))
 })
