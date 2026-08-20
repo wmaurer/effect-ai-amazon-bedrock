@@ -232,8 +232,9 @@ export type Citations = typeof CitationsConfig.Encoded
  *
  * **Details**
  *
- * File parts are the only prompt parts that can request citations, so they
- * carry both the cache point every part accepts and the citations config.
+ * File parts are the only prompt parts that map onto a document block, so they
+ * carry the cache point every part accepts plus the two document-level knobs:
+ * the citations config and the interpretation context.
  */
 interface FileOptions {
   readonly amazonBedrock?: {
@@ -242,6 +243,13 @@ interface FileOptions {
      * emitted after the block this is attached to.
      */
     readonly cachePoint?: CachePoint | null
+    /**
+     * Guidance the model reads when interpreting the document, such as what
+     * the document is or which parts of it matter. Sent whenever it is set,
+     * independently of `citations`. Ignored for image file parts, which do not
+     * become document blocks.
+     */
+    readonly context?: string | null
     /**
      * Opts the document into citations. Ignored for image file parts, which
      * Converse cannot cite.
@@ -781,6 +789,7 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                     const documentFormat = documentFormats[part.mediaType]
                     if (Predicate.isNotUndefined(documentFormat)) {
                       const name = documentName(part.fileName, documents.length + 1)
+                      const context = part.options.amazonBedrock?.context
                       const citations = part.options.amazonBedrock?.citations
                       documents.push({ name, mediaType: part.mediaType, fileName: part.fileName })
                       content.push({
@@ -788,6 +797,7 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                           format: documentFormat,
                           name,
                           source: yield* documentSource(part.mediaType, name, part.data),
+                          ...(Predicate.isNullish(context) ? {} : { context }),
                           ...(Predicate.isNullish(citations) ? {} : { citations })
                         }
                       })

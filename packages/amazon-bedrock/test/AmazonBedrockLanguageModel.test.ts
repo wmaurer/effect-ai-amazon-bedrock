@@ -962,6 +962,54 @@ describe("AmazonBedrockLanguageModel", () => {
         }])
       }))
 
+    it.effect("sends context on a document block when requested", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", {
+            mediaType: "application/pdf",
+            fileName: "report.pdf",
+            data: "AQID",
+            options: {
+              amazonBedrock: {
+                context: "A quarterly earnings report.",
+                citations: { enabled: true }
+              }
+            }
+          })
+        ])
+
+        assert.deepStrictEqual(content, [{
+          document: {
+            format: "pdf",
+            name: "report",
+            source: { bytes: "AQID" },
+            context: "A quarterly earnings report.",
+            citations: { enabled: true }
+          }
+        }])
+      }))
+
+    it.effect("sends context on a document block with citations disabled", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", {
+            mediaType: "application/pdf",
+            fileName: "report.pdf",
+            data: "AQID",
+            options: { amazonBedrock: { context: "A quarterly earnings report." } }
+          })
+        ])
+
+        assert.deepStrictEqual(content, [{
+          document: {
+            format: "pdf",
+            name: "report",
+            source: { bytes: "AQID" },
+            context: "A quarterly earnings report."
+          }
+        }])
+      }))
+
     const generateWithDocument = (content: ReadonlyArray<unknown>) =>
       LanguageModel.generateText({
         prompt: Prompt.fromMessages([
