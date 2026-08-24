@@ -242,11 +242,16 @@ export const mapStatusCodeToReason = ({ http, message, status }: {
     case 401:
       return new AiError.AuthenticationError({
         kind: "InvalidKey",
+        description: message,
         http
       })
     case 403:
+      // Bedrock returns 403 both for genuine credential problems and for models
+      // the account is not entitled to ("... is not available for this account").
+      // Only the server's own message separates the two, so carry it through.
       return new AiError.AuthenticationError({
         kind: "InsufficientPermissions",
+        description: message,
         http
       })
     case 408:

@@ -22,10 +22,17 @@
  *   AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=eu-west-1 \
  *     pnpm tsx packages/ai/amazon-bedrock/smoke-bedrock.ts
  */
-import { Config, Effect, Layer, Schema } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
-import { LanguageModel, Prompt } from "effect/unstable/ai"
-import { AmazonBedrockClient, AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
+/* eslint-disable no-console -- printing the results IS this script's output */
+import * as AmazonBedrockClient from "@effect/ai-amazon-bedrock/AmazonBedrockClient"
+import * as AmazonBedrockLanguageModel from "@effect/ai-amazon-bedrock/AmazonBedrockLanguageModel"
+import * as Config from "effect/Config"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+import * as LanguageModel from "effect/unstable/ai/LanguageModel"
+import * as Prompt from "effect/unstable/ai/Prompt"
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 
 /**
  * Sonnet 4.5, because Sonnet 5 and Opus 5 are gated on this account.
@@ -62,15 +69,25 @@ const captureRawUsage = (client: HttpClient.HttpClient) =>
     )
   )
 
+/**
+ * Temporary credentials — from `aws login` or `aws sts assume-role` — come as a
+ * triple and are rejected without the session token. Long-lived IAM user keys come
+ * as a pair and must NOT carry one. Presence of the env var decides, because
+ * `layerConfig` takes an optional `Config`, not a `Config` of an optional.
+ */
+const sessionTokenOption = process.env.AWS_SESSION_TOKEN === undefined
+  ? {}
+  : { sessionToken: Config.redacted("AWS_SESSION_TOKEN") }
+
 const clientLayer = AmazonBedrockClient.layerConfig({
   accessKeyId: Config.string("AWS_ACCESS_KEY_ID"),
   secretAccessKey: Config.redacted("AWS_SECRET_ACCESS_KEY"),
+  ...sessionTokenOption,
   region: Config.string("AWS_REGION").pipe(Config.withDefault("eu-west-1")),
   transformClient: captureRawUsage
 }).pipe(Layer.provide(FetchHttpClient.layer))
 
-const modelLayerFor = (model: string) =>
-  AmazonBedrockLanguageModel.layer({ model }).pipe(Layer.provide(clientLayer))
+const modelLayerFor = (model: string) => AmazonBedrockLanguageModel.layer({ model }).pipe(Layer.provide(clientLayer))
 
 // =============================================================================
 // 1. generateText

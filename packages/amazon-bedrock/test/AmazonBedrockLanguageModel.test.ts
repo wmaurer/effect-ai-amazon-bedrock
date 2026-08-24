@@ -468,6 +468,42 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.include(error.message, "The provided model identifier is invalid.")
       }))
 
+    it.effect("maps 403 to InsufficientPermissions and surfaces the AWS message", () =>
+      Effect.gen(function*() {
+        // A 403 from Bedrock can mean the credentials are bad OR that the account
+        // is not entitled to the model. Only the AWS message tells them apart.
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(jsonResponse(
+            request,
+            { message: "anthropic.claude-sonnet-5 is not available for this account." },
+            403
+          ))
+
+        const error = yield* Effect.flip(
+          LanguageModel.generateText({ prompt: "Hello" }).pipe(Effect.provide(layersFor(handler)))
+        )
+        assert.strictEqual(error.reason._tag, "AuthenticationError")
+        if (error.reason._tag === "AuthenticationError") {
+          assert.strictEqual(error.reason.kind, "InsufficientPermissions")
+        }
+        assert.include(error.message, "anthropic.claude-sonnet-5 is not available for this account.")
+      }))
+
+    it.effect("maps 401 to InvalidKey and surfaces the AWS message", () =>
+      Effect.gen(function*() {
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(jsonResponse(request, { message: "The security token included is invalid." }, 401))
+
+        const error = yield* Effect.flip(
+          LanguageModel.generateText({ prompt: "Hello" }).pipe(Effect.provide(layersFor(handler)))
+        )
+        assert.strictEqual(error.reason._tag, "AuthenticationError")
+        if (error.reason._tag === "AuthenticationError") {
+          assert.strictEqual(error.reason.kind, "InvalidKey")
+        }
+        assert.include(error.message, "The security token included is invalid.")
+      }))
+
     it.effect("encodes an assistant tool-call as a toolUse block", () =>
       Effect.gen(function*() {
         let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
