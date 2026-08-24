@@ -21,13 +21,14 @@ const makeHttpClient = (
 const jsonResponse = (
   request: HttpClientRequest.HttpClientRequest,
   body: unknown,
-  status = 200
+  status = 200,
+  headers: Record<string, string> = {}
 ): HttpClientResponse.HttpClientResponse =>
   HttpClientResponse.fromWeb(
     request,
     new Response(JSON.stringify(body), {
       status,
-      headers: { "content-type": "application/json" }
+      headers: { "content-type": "application/json", ...headers }
     })
   )
 
@@ -468,16 +469,66 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.include(error.message, "The provided model identifier is invalid.")
       }))
 
-    it.effect("maps 403 to InsufficientPermissions and surfaces the AWS message", () =>
+    // Bedrock answers 403 for four different problems and separates them only in
+    // the `x-amzn-errortype` header. The status alone cannot tell a bad key from an
+    // expired one from a model the account may not use.
+    const authCases = [
+      {
+        errorType: "AccessDeniedException",
+        status: 403,
+        message: "anthropic.claude-sonnet-5 is not available for this account.",
+        kind: "InsufficientPermissions"
+      },
+      {
+        errorType: "ExpiredTokenException",
+        status: 403,
+        message: "The security token included in the request is expired",
+        kind: "ExpiredKey"
+      },
+      {
+        errorType: "UnrecognizedClientException",
+        status: 403,
+        message: "The security token included in the request is invalid.",
+        kind: "InvalidKey"
+      },
+      {
+        errorType: "InvalidSignatureException",
+        status: 403,
+        message: "Signature expired",
+        kind: "InvalidKey"
+      },
+      {
+        errorType: "MissingAuthenticationTokenException",
+        status: 401,
+        message: "Missing Authentication Token",
+        kind: "MissingKey"
+      }
+    ] as const
+
+    for (const testCase of authCases) {
+      it.effect(`maps ${testCase.errorType} to ${testCase.kind}`, () =>
+        Effect.gen(function*() {
+          const handler = (request: HttpClientRequest.HttpClientRequest) =>
+            Effect.succeed(jsonResponse(request, { message: testCase.message }, testCase.status, {
+              // AWS appends a Coral shape URL after a colon; only the prefix identifies it.
+              "x-amzn-errortype": `${testCase.errorType}:http://internal.amazon.com/coral/com.amazon.bedrock/`
+            }))
+
+          const error = yield* Effect.flip(
+            LanguageModel.generateText({ prompt: "Hello" }).pipe(Effect.provide(layersFor(handler)))
+          )
+          assert.strictEqual(error.reason._tag, "AuthenticationError")
+          if (error.reason._tag === "AuthenticationError") {
+            assert.strictEqual(error.reason.kind, testCase.kind)
+          }
+          assert.include(error.message, testCase.message)
+        }))
+    }
+
+    it.effect("falls back to the status when no error type header is present", () =>
       Effect.gen(function*() {
-        // A 403 from Bedrock can mean the credentials are bad OR that the account
-        // is not entitled to the model. Only the AWS message tells them apart.
         const handler = (request: HttpClientRequest.HttpClientRequest) =>
-          Effect.succeed(jsonResponse(
-            request,
-            { message: "anthropic.claude-sonnet-5 is not available for this account." },
-            403
-          ))
+          Effect.succeed(jsonResponse(request, { message: "Forbidden" }, 403))
 
         const error = yield* Effect.flip(
           LanguageModel.generateText({ prompt: "Hello" }).pipe(Effect.provide(layersFor(handler)))
@@ -486,22 +537,6 @@ describe("AmazonBedrockLanguageModel", () => {
         if (error.reason._tag === "AuthenticationError") {
           assert.strictEqual(error.reason.kind, "InsufficientPermissions")
         }
-        assert.include(error.message, "anthropic.claude-sonnet-5 is not available for this account.")
-      }))
-
-    it.effect("maps 401 to InvalidKey and surfaces the AWS message", () =>
-      Effect.gen(function*() {
-        const handler = (request: HttpClientRequest.HttpClientRequest) =>
-          Effect.succeed(jsonResponse(request, { message: "The security token included is invalid." }, 401))
-
-        const error = yield* Effect.flip(
-          LanguageModel.generateText({ prompt: "Hello" }).pipe(Effect.provide(layersFor(handler)))
-        )
-        assert.strictEqual(error.reason._tag, "AuthenticationError")
-        if (error.reason._tag === "AuthenticationError") {
-          assert.strictEqual(error.reason.kind, "InvalidKey")
-        }
-        assert.include(error.message, "The security token included is invalid.")
       }))
 
     it.effect("encodes an assistant tool-call as a toolUse block", () =>

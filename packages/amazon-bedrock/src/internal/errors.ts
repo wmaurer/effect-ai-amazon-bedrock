@@ -149,6 +149,7 @@ const mapStatusCodeError = Effect.fnUntraced(function*(
   const reason = mapStatusCodeToReason({
     status,
     message,
+    errorType: extractErrorType(response.headers["x-amzn-errortype"]),
     http: buildHttpContext({ request, response, body })
   })
 
@@ -217,10 +218,35 @@ const buildInvalidRequestDescription = (params: {
   return parts.join(" ")
 }
 
+/**
+ * AWS sends the exception shape as `Name:http://internal.amazon.com/coral/...`.
+ * Only the part before the colon identifies it.
+ */
+const extractErrorType = (header: string | undefined): string | undefined =>
+  Predicate.isUndefined(header) ? undefined : header.split(":")[0]
+
+/**
+ * Bedrock answers 403 for four unrelated problems and 401 for a fifth, and the
+ * status alone cannot tell them apart — a bad key, an expired session token and a
+ * model the account is not entitled to all arrive as 403. Reporting every one of
+ * them as `InsufficientPermissions` sends people to IAM even when IAM is fine;
+ * expired `aws login` credentials are the common case. The exception shape in
+ * `x-amzn-errortype` is what actually distinguishes them.
+ */
+const authenticationKinds: Record<string, typeof AiError.AuthenticationError.Type["kind"]> = {
+  AccessDeniedException: "InsufficientPermissions",
+  ExpiredTokenException: "ExpiredKey",
+  IncompleteSignatureException: "InvalidKey",
+  InvalidSignatureException: "InvalidKey",
+  MissingAuthenticationTokenException: "MissingKey",
+  UnrecognizedClientException: "InvalidKey"
+}
+
 /** @internal */
-export const mapStatusCodeToReason = ({ http, message, status }: {
+export const mapStatusCodeToReason = ({ errorType, http, message, status }: {
   readonly status: number
   readonly message: string | undefined
+  readonly errorType?: string | undefined
   readonly http: typeof AiError.HttpContext.Type
 }): AiError.AiErrorReason => {
   const invalidRequestDescription = buildInvalidRequestDescription({
@@ -240,17 +266,11 @@ export const mapStatusCodeToReason = ({ http, message, status }: {
         http
       })
     case 401:
-      return new AiError.AuthenticationError({
-        kind: "InvalidKey",
-        description: message,
-        http
-      })
     case 403:
-      // Bedrock returns 403 both for genuine credential problems and for models
-      // the account is not entitled to ("... is not available for this account").
-      // Only the server's own message separates the two, so carry it through.
       return new AiError.AuthenticationError({
-        kind: "InsufficientPermissions",
+        kind: (Predicate.isNotUndefined(errorType) ? authenticationKinds[errorType] : undefined)
+          // No header, or a shape we do not know: fall back to what the status implies.
+          ?? (status === 401 ? "InvalidKey" : "InsufficientPermissions"),
         description: message,
         http
       })
