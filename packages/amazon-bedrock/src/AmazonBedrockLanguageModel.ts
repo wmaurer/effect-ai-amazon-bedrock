@@ -675,24 +675,22 @@ const fileSource: (
  *
  * **Details**
  *
- * A textual document travels as `text` rather than base64 `bytes`: base64
- * inflates the payload by about a third, and Converse accepts the plain
- * string. That applies only to inline data - an s3 location stays a reference,
- * and a binary format like pdf stays base64. `Prompt.FilePart` string data is
- * base64, so it is decoded rather than forwarded; invalid base64 fails here
- * instead of drawing an opaque 400 from Bedrock. Decoding assumes UTF-8; text
- * with a different encoding becomes U+FFFD replacement characters rather than
- * an error.
+ * A `text` source is only accepted alongside a citations config: Converse
+ * rejects a document whose source is `text` with "must set one of the following
+ * keys: bytes, s3Location" otherwise. The Smithy model does not express this —
+ * it lists `text` as an unconditional member of the union — so a text document
+ * without citations is sent as `bytes` like any other.
  */
 const documentSource: (
   mediaType: string,
   name: string,
-  data: typeof Prompt.FilePart.Type["data"]
+  data: typeof Prompt.FilePart.Type["data"],
+  citable: boolean
 ) => Effect.Effect<typeof DocumentSource.Encoded, AiError.AiError> = Effect.fnUntraced(
-  function*(mediaType, name, data) {
+  function*(mediaType, name, data, citable) {
     const source = yield* fileSource(data)
     // `bytes` is undefined for an s3 location, which stays a reference.
-    if (!mediaType.startsWith("text/") || Predicate.isUndefined(source.bytes)) {
+    if (!citable || !mediaType.startsWith("text/") || Predicate.isUndefined(source.bytes)) {
       return source
     }
     if (data instanceof Uint8Array) {
@@ -796,7 +794,12 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
                         document: {
                           format: documentFormat,
                           name,
-                          source: yield* documentSource(part.mediaType, name, part.data),
+                          source: yield* documentSource(
+                            part.mediaType,
+                            name,
+                            part.data,
+                            !Predicate.isNullish(citations)
+                          ),
                           ...(Predicate.isNullish(context) ? {} : { context }),
                           ...(Predicate.isNullish(citations) ? {} : { citations })
                         }

@@ -778,10 +778,58 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(content[1].document.format, "csv")
       }))
 
-    it.effect("sends a text document as a text source", () =>
+    it.effect("sends a cited text document as a text source", () =>
       Effect.gen(function*() {
         // "aGVsbG8gd29ybGQ=" is base64 for "hello world"; string file part data
         // is base64 per the `Prompt.FilePart` contract.
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", {
+            mediaType: "text/plain",
+            fileName: "notes.txt",
+            data: "aGVsbG8gd29ybGQ=",
+            options: { amazonBedrock: { citations: { enabled: true } } }
+          })
+        ])
+
+        assert.deepStrictEqual(content, [{
+          document: {
+            format: "txt",
+            name: "notes",
+            source: { text: "hello world" },
+            citations: { enabled: true }
+          }
+        }])
+      }))
+
+    it.effect("decodes Uint8Array data for a cited text document as utf-8", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", {
+            mediaType: "text/markdown",
+            fileName: "readme.md",
+            data: new TextEncoder().encode("# Title"),
+            options: { amazonBedrock: { citations: { enabled: true } } }
+          })
+        ])
+
+        assert.deepStrictEqual(content, [{
+          document: {
+            format: "md",
+            name: "readme",
+            source: { text: "# Title" },
+            citations: { enabled: true }
+          }
+        }])
+      }))
+
+    /**
+     * Converse accepts a `text` document source only alongside a citations config, and
+     * answers "must set one of the following keys: bytes, s3Location" otherwise. The
+     * Smithy model does not say so — it lists `text` as an unconditional member of the
+     * union — so this was only visible from a live call.
+     */
+    it.effect("sends an uncited text document as a bytes source", () =>
+      Effect.gen(function*() {
         const content = yield* captureUserContent([
           Prompt.makePart("file", {
             mediaType: "text/plain",
@@ -791,11 +839,11 @@ describe("AmazonBedrockLanguageModel", () => {
         ])
 
         assert.deepStrictEqual(content, [{
-          document: { format: "txt", name: "notes", source: { text: "hello world" } }
+          document: { format: "txt", name: "notes", source: { bytes: "aGVsbG8gd29ybGQ=" } }
         }])
       }))
 
-    it.effect("decodes Uint8Array data for a text document as utf-8", () =>
+    it.effect("sends uncited Uint8Array text document data as bytes, not decoded text", () =>
       Effect.gen(function*() {
         const content = yield* captureUserContent([
           Prompt.makePart("file", {
@@ -806,8 +854,23 @@ describe("AmazonBedrockLanguageModel", () => {
         ])
 
         assert.deepStrictEqual(content, [{
-          document: { format: "md", name: "readme", source: { text: "# Title" } }
+          document: { format: "md", name: "readme", source: { bytes: "IyBUaXRsZQ==" } }
         }])
+      }))
+
+    it.effect("keeps the context option on an uncited text document", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", {
+            mediaType: "text/plain",
+            fileName: "notes.txt",
+            data: "aGVsbG8gd29ybGQ=",
+            options: { amazonBedrock: { context: "Throughput figures are authoritative." } }
+          })
+        ])
+
+        assert.deepStrictEqual(content[0].document.source, { bytes: "aGVsbG8gd29ybGQ=" })
+        assert.strictEqual(content[0].document.context, "Throughput figures are authoritative.")
       }))
 
     it.effect("keeps a binary document as a bytes source", () =>
@@ -830,11 +893,18 @@ describe("AmazonBedrockLanguageModel", () => {
         })
       }))
 
-    it.effect("fails on text document data that is not base64", () =>
+    // Only the cited path decodes the base64 itself; an uncited document passes the string
+    // through as `bytes` and lets Converse reject it.
+    it.effect("fails on cited text document data that is not base64", () =>
       Effect.gen(function*() {
         const error = yield* Effect.flip(
           captureUserContent([
-            Prompt.makePart("file", { mediaType: "text/plain", fileName: "notes.txt", data: "not base64!!" })
+            Prompt.makePart("file", {
+              mediaType: "text/plain",
+              fileName: "notes.txt",
+              data: "not base64!!",
+              options: { amazonBedrock: { citations: { enabled: true } } }
+            })
           ])
         )
 
