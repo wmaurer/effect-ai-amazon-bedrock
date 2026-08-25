@@ -14,6 +14,18 @@ catch a shared misreading. Only bytes AWS actually produced can.
 
 They replace the earlier throwaway `smoke-bedrock.ts`.
 
+| File                                       | Covers                                                                                                            |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `AmazonBedrock.integration.test.ts`        | `generateText`, `generateObject`, cache checkpoints at both TTLs, the usage-disjointness oracle                   |
+| `AmazonBedrockStream.integration.test.ts`  | real `vnd.amazon.eventstream` bytes: multi-frame text deltas, a tool call whose input JSON is split across frames |
+| `AmazonBedrockContent.integration.test.ts` | image blocks, document blocks, citations                                                                          |
+| `AmazonBedrockErrors.integration.test.ts`  | the `x-amzn-errortype` -> `AuthenticationError.kind` table, against exceptions AWS actually sent                  |
+
+They have already earned their keep: the document suite caught Converse rejecting every
+uncited `text/*` document, because a `text` document source is only accepted alongside a
+citations config. The Smithy model lists `text` as an unconditional member of the union,
+so neither the model nor a stubbed test could have shown it.
+
 ## Why they never run by accident
 
 The filenames end in `.integration.test.ts`, which `vitest.config.ts:51` excludes unless
@@ -28,11 +40,16 @@ Credentials come from the environment. With the `with-aws` fish function:
 
 ```fish
 with-aws -r eu-west-1 env EFFECT_INTEGRATION_TESTS=1 \
-  pnpm vitest run --project @effect/ai-amazon-bedrock
+  pnpm vitest run --project @effect/ai-amazon-bedrock --no-file-parallelism
 ```
 
-Without it, export `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
-(only for temporary `ASIA…` credentials) and `AWS_REGION` yourself.
+Without `with-aws`, export `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+`AWS_SESSION_TOKEN` (only for temporary `ASIA…` credentials) and `AWS_REGION` yourself.
+
+`--no-file-parallelism` is not optional. Each suite is declared `{ sequential: true }`, but vitest
+still runs the four files concurrently, and the resulting burst exceeds the on-demand
+tokens-per-minute quota for Sonnet 4.5 in `eu-west-1` — runs without it fail two or three
+tests with `RateLimitError`, at random. That is an account quota, not a provider defect.
 
 `BEDROCK_MODEL_ID` overrides the model. The default is the EU geo inference profile —
 Sonnet 4.5 has no in-region support in any region, so the bare foundation-model id is
@@ -41,7 +58,8 @@ Any IAM policy therefore needs `inference-profile` ARNs, not just `foundation-mo
 
 ## Cost
 
-Roughly a dozen calls per full run. The prompts are tiny except the cache-point suite,
+Roughly fifteen calls per full run, three of which are rejected at the signature check
+and so cost nothing. The prompts are tiny except the cache-point suite,
 which deliberately sends a >1024-token prefix twice (Sonnet 4.5's minimum checkpoint
 size) and pays one cache write per run — a few cents. The prefix carries a per-run nonce
 so the first call is always a genuine write; without it a warm 5-minute cache from a

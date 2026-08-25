@@ -11,7 +11,7 @@ import { assertDisjointUsage, captureRawUsage, liveDisabled, modelLayer } from "
 
 const TIMEOUT = 120_000
 
-describe.skipIf(liveDisabled)("Amazon Bedrock (live)", () => {
+describe.skipIf(liveDisabled)("Amazon Bedrock (live)", { sequential: true }, () => {
   it.effect("generateText round-trips against the Converse API", () =>
     Effect.gen(function*() {
       const response = yield* LanguageModel.generateText({ prompt: "Reply with exactly: ok" })
@@ -49,13 +49,13 @@ describe.skipIf(liveDisabled)("Amazon Bedrock (live)", () => {
         (_, i) => `Rule ${i} (${nonce}): prefer explicit failure over silent fallback.`
       ).join("\n")
 
-    const cachedPrompt = (nonce: string, question: string) =>
+    const cachedPrompt = (nonce: string, question: string, ttl: "5m" | "1h" = "5m") =>
       Prompt.fromMessages([
         Prompt.makeMessage("system", {
           content: prefixFor(nonce),
           // 5m and 1h bill cache writes at different rates ($3.75 vs $6.00 per 1M against a
           // $3.00 input rate), so the TTL is pinned rather than left to Bedrock's default.
-          options: { amazonBedrock: { cachePoint: { type: "default", ttl: "5m" } } }
+          options: { amazonBedrock: { cachePoint: { type: "default", ttl } } }
         }),
         Prompt.makeMessage("user", {
           content: [Prompt.makePart("text", { text: question })]
@@ -84,6 +84,24 @@ describe.skipIf(liveDisabled)("Amazon Bedrock (live)", () => {
         // equation held whether writes were disjoint or inclusive.
         assertDisjointUsage(assert, write)
         assertDisjointUsage(assert, read)
+      }), TIMEOUT)
+
+    it.effect("accepts a 1h checkpoint, not just the default 5m", () =>
+      Effect.gen(function*() {
+        const { transform, usages } = captureRawUsage()
+        const nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+        // One call, not two: the risk here is that `ttl` is spelled or valued in a way
+        // Converse rejects, or that the longer TTL needs an opt-in this account does not
+        // have. Either shows up as a ValidationException on the write. Reading it back
+        // would only re-prove the 5m case's plumbing.
+        yield* LanguageModel.generateText({ prompt: cachedPrompt(nonce, "Say A.", "1h") })
+          .pipe(Effect.provide(modelLayer(transform)))
+
+        assert.strictEqual(usages.length, 1)
+        const [write] = usages as [Record<string, number>]
+        assert.isAbove(write.cacheWriteInputTokens ?? 0, 0, "the 1h checkpoint should be written")
+        assertDisjointUsage(assert, write)
       }), TIMEOUT)
   })
 })

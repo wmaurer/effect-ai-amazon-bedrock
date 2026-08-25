@@ -50,6 +50,37 @@ export const modelLayer = (
   )
 
 /**
+ * A model layer whose credentials are deliberately wrong, for the error-classification
+ * checks. Overriding one field at a time is what separates the AWS exception shapes: a
+ * key id AWS has never seen is `UnrecognizedClientException`, while a real key id with the
+ * wrong secret is `InvalidSignatureException`.
+ */
+export const brokenCredentialsLayer = (
+  overrides: {
+    readonly accessKeyId?: string
+    readonly secretAccessKey?: string
+    readonly sessionToken?: string | undefined
+  }
+) =>
+  AmazonBedrockLanguageModel.layer({ model: MODEL }).pipe(
+    Layer.provide(AmazonBedrockClient.layer({
+      ...credentials(),
+      ...(overrides.accessKeyId === undefined ? {} : { accessKeyId: overrides.accessKeyId }),
+      ...(overrides.secretAccessKey === undefined
+        ? {}
+        : { secretAccessKey: Redacted.make(overrides.secretAccessKey) }),
+      ...("sessionToken" in overrides
+        ? {
+          sessionToken: overrides.sessionToken === undefined
+            ? undefined
+            : Redacted.make(overrides.sessionToken)
+        }
+        : {})
+    })),
+    Layer.provide(FetchHttpClient.layer)
+  )
+
+/**
  * Bedrock's own `totalTokens` is decoded and then discarded — nothing in `src/` reads it,
  * so the only way to compare it against the provider's computed total is to intercept the
  * untouched response body on the way through.

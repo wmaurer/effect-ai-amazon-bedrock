@@ -20,7 +20,7 @@ const TIMEOUT = 120_000
 const collect = <A, E, R>(stream: Stream.Stream<A, E, R>) =>
   stream.pipe(Stream.runCollect, Effect.map((chunk) => globalThis.Array.from(chunk)))
 
-describe.skipIf(liveDisabled)("Amazon Bedrock streaming (live)", () => {
+describe.skipIf(liveDisabled)("Amazon Bedrock streaming (live)", { sequential: true }, () => {
   it.effect("decodes real event-stream frames into incremental text parts", () =>
     Effect.gen(function*() {
       const parts = yield* collect(
