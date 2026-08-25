@@ -4,6 +4,7 @@
  * See ./README.md — this whole directory is temporary and comes out before the branch is
  * squashed for the upstream PR.
  */
+import { AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { LanguageModel, Prompt } from "effect/unstable/ai"
@@ -34,6 +35,22 @@ describe.skipIf(liveDisabled)("Amazon Bedrock (live)", { sequential: true }, () 
       // returning an empty string that happens to satisfy Schema.String.
       assert.include(["low", "medium", "high"], response.value.severity)
       assert.isAtLeast(response.value.summary.length, 1)
+    }).pipe(Effect.provide(modelLayer())), TIMEOUT)
+
+  it.effect("reports a length finish when the response is cut off at maxTokens", () =>
+    Effect.gen(function*() {
+      const response = yield* LanguageModel.generateText({
+        prompt: "Count from 1 to 100, separated by spaces."
+      }).pipe(
+        // `resolveFinishReason` maps nine Converse stop reasons; live runs have only ever
+        // seen `end_turn`. A one-token ceiling forces `max_tokens` deterministically, and
+        // costs a single output token to do it.
+        Effect.provideService(AmazonBedrockLanguageModel.Config, {
+          inferenceConfig: { maxTokens: 1 }
+        })
+      )
+
+      assert.strictEqual(response.finishReason, "length")
     }).pipe(Effect.provide(modelLayer())), TIMEOUT)
 
   describe("cachePoint", () => {
