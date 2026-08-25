@@ -14,17 +14,19 @@ catch a shared misreading. Only bytes AWS actually produced can.
 
 They replace the earlier throwaway `smoke-bedrock.ts`.
 
-| File                                       | Covers                                                                                                            |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `AmazonBedrock.integration.test.ts`        | `generateText`, `generateObject`, cache checkpoints at both TTLs, the usage-disjointness oracle                   |
-| `AmazonBedrockStream.integration.test.ts`  | real `vnd.amazon.eventstream` bytes: multi-frame text deltas, a tool call whose input JSON is split across frames |
-| `AmazonBedrockContent.integration.test.ts` | image blocks, document blocks, citations                                                                          |
-| `AmazonBedrockErrors.integration.test.ts`  | the `x-amzn-errortype` -> `AuthenticationError.kind` table, against exceptions AWS actually sent                  |
+| File                                       | Covers                                                                                                                                        |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AmazonBedrock.integration.test.ts`        | `generateText`, `generateObject`, cache checkpoints at both TTLs, the usage-disjointness oracle                                               |
+| `AmazonBedrockStream.integration.test.ts`  | real `vnd.amazon.eventstream` bytes: multi-frame text deltas, a tool call whose input JSON is split across frames                             |
+| `AmazonBedrockContent.integration.test.ts` | image blocks, document blocks, citations                                                                                                      |
+| `AmazonBedrockErrors.integration.test.ts`  | the `x-amzn-errortype` -> `AuthenticationError.kind` table, against exceptions AWS actually sent, plus the signing path with no session token |
 
-They have already earned their keep: the document suite caught Converse rejecting every
-uncited `text/*` document, because a `text` document source is only accepted alongside a
-citations config. The Smithy model lists `text` as an unconditional member of the union,
-so neither the model nor a stubbed test could have shown it.
+They have already earned their keep twice. The document suite caught Converse rejecting
+every uncited `text/*` document, because a `text` document source is only accepted alongside
+a citations config — the Smithy model lists `text` as an unconditional member of the union,
+so neither the model nor a stubbed test could have shown it. The error suite then found that
+a request with no `Authorization` header comes back as `AccessDeniedException`, not the
+`MissingAuthenticationTokenException` the documentation implies.
 
 ## Why they never run by accident
 
@@ -58,8 +60,8 @@ Any IAM policy therefore needs `inference-profile` ARNs, not just `foundation-mo
 
 ## Cost
 
-Roughly fifteen calls per full run, three of which are rejected at the signature check
-and so cost nothing. The prompts are tiny except the cache-point suite,
+Roughly seventeen calls per full run, five of which are rejected before they reach a
+model and so cost nothing. The prompts are tiny except the cache-point suite,
 which deliberately sends a >1024-token prefix twice (Sonnet 4.5's minimum checkpoint
 size) and pays one cache write per run — a few cents. The prefix carries a per-run nonce
 so the first call is always a genuine write; without it a warm 5-minute cache from a

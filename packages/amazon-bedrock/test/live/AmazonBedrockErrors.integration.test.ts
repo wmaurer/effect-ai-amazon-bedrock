@@ -15,7 +15,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Redacted } from "effect"
 import { AiError, LanguageModel } from "effect/unstable/ai"
-import { brokenCredentialsLayer, liveDisabled } from "./helpers.ts"
+import { brokenCredentialsLayer, liveDisabled, unsignedLayer } from "./helpers.ts"
 
 const TIMEOUT = 60_000
 
@@ -38,7 +38,9 @@ const errorTypeOf = (reason: typeof AiError.AuthenticationError.Type): string | 
  * the failure really was an authentication error rather than, say, a validation error that
  * happens also to be a 4xx.
  */
-const authenticationFailure = (layer: ReturnType<typeof brokenCredentialsLayer>) =>
+const authenticationFailure = (
+  layer: ReturnType<typeof brokenCredentialsLayer> | ReturnType<typeof unsignedLayer>
+) =>
   Effect.gen(function*() {
     const error = yield* Effect.flip(
       LanguageModel.generateText({ prompt: "Reply with exactly: ok" }).pipe(Effect.provide(layer))
@@ -86,5 +88,35 @@ describe.skipIf(liveDisabled)("Amazon Bedrock authentication errors (live)", { s
       // decoding it wrong leaves `description` undefined and the reader with only "403".
       assert.isDefined(reason.description)
       assert.isAtLeast(reason.description!.length, 1)
+    }), TIMEOUT)
+
+  it.effect("classifies an unsigned request as InsufficientPermissions", () =>
+    Effect.gen(function*() {
+      const reason = yield* authenticationFailure(unsignedLayer())
+
+      // Documented as the `MissingAuthenticationTokenException` case; Bedrock disagrees. The
+      // request that has no `Authorization` header at all comes back as
+      // `AccessDeniedException` with "Authorization header is missing", so `MissingKey` is
+      // not the kind a reader gets, and the third table entry is pinned by this instead.
+      assert.strictEqual(errorTypeOf(reason), "AccessDeniedException")
+      assert.strictEqual(reason.kind, "InsufficientPermissions")
+      // This is also the only observed response that spells the body key `Message`; the
+      // lower-case `message` of every other error would decode even if the schema dropped it.
+      assert.strictEqual(reason.description, "Authorization header is missing")
+    }), TIMEOUT)
+
+  it.effect("signs without a session token when none is configured", () =>
+    Effect.gen(function*() {
+      const reason = yield* authenticationFailure(
+        // The live credentials are a temporary `ASIA…` triple, which AWS rejects without its
+        // session token — so the failure is expected. What it establishes is that the signer
+        // omits `x-amz-security-token` cleanly rather than signing an `undefined` value:
+        // a malformed canonical request fails as `IncompleteSignatureException` or
+        // `InvalidSignatureException` well before AWS looks the token up at all.
+        brokenCredentialsLayer({ sessionToken: undefined })
+      )
+
+      assert.strictEqual(errorTypeOf(reason), "UnrecognizedClientException")
+      assert.strictEqual(reason.kind, "InvalidKey")
     }), TIMEOUT)
 })

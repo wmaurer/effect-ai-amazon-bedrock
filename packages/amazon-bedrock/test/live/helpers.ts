@@ -6,7 +6,7 @@
  */
 import { AmazonBedrockClient, AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
 import { Effect, Layer, Redacted } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 
 /**
  * Sonnet 4.5 via the EU geo inference profile. The bare foundation-model id is rejected —
@@ -76,6 +76,23 @@ export const brokenCredentialsLayer = (
             : Redacted.make(overrides.sessionToken)
         }
         : {})
+    })),
+    Layer.provide(FetchHttpClient.layer)
+  )
+
+/**
+ * A model layer whose requests lose their `Authorization` header after signing.
+ *
+ * `transformClient` wraps the signing client from the outside, so its request transform is
+ * the last one to run — stripping the header here is the only way to put a genuinely
+ * unauthenticated request on the wire through the provider, since the signer unconditionally
+ * sets one.
+ */
+export const unsignedLayer = () =>
+  AmazonBedrockLanguageModel.layer({ model: MODEL }).pipe(
+    Layer.provide(AmazonBedrockClient.layer({
+      ...credentials(),
+      transformClient: (client) => HttpClient.mapRequest(client, HttpClientRequest.removeHeader("authorization"))
     })),
     Layer.provide(FetchHttpClient.layer)
   )
