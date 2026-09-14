@@ -513,7 +513,7 @@ export const model = (
 export const make = Effect.fnUntraced(function*({ config: providerConfig, model }: {
   readonly model: (string & {}) | Model
   readonly config?: Omit<typeof Config.Service, "modelId"> | undefined
-}): Effect.fn.Return<LanguageModel.Service, never, AmazonBedrockClient> {
+}): Effect.fn.Return<LanguageModel.LanguageModel, never, AmazonBedrockClient> {
   const client = yield* AmazonBedrockClient
 
   const makeRequest = Effect.fnUntraced(
