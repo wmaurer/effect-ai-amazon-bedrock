@@ -14,13 +14,14 @@ catch a shared misreading. Only bytes AWS actually produced can.
 
 They replace the earlier throwaway `smoke-bedrock.ts`.
 
-| File                                       | Covers                                                                                                                                        |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AmazonBedrock.integration.test.ts`        | `generateText`, `generateObject`, the `max_tokens` stop reason, cache checkpoints at both TTLs, the usage-disjointness oracle                 |
-| `AmazonBedrockStream.integration.test.ts`  | real `vnd.amazon.eventstream` bytes: multi-frame text deltas, a tool call whose input JSON is split across frames                             |
-| `AmazonBedrockContent.integration.test.ts` | image blocks, document blocks, citations                                                                                                      |
-| `AmazonBedrockErrors.integration.test.ts`  | the `x-amzn-errortype` -> `AuthenticationError.kind` table, against exceptions AWS actually sent, plus the signing path with no session token |
-| `AmazonBedrockTools.integration.test.ts`   | the tool round-trip: a `toolResult` sent back to Converse against the `toolUse` it answers                                                    |
+| File                                         | Covers                                                                                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AmazonBedrock.integration.test.ts`          | `generateText`, `generateObject`, the `max_tokens` stop reason, cache checkpoints at both TTLs, the usage-disjointness oracle                     |
+| `AmazonBedrockStream.integration.test.ts`    | real `vnd.amazon.eventstream` bytes: multi-frame text deltas, a tool call whose input JSON is split across frames                                 |
+| `AmazonBedrockContent.integration.test.ts`   | image blocks, document blocks, citations                                                                                                          |
+| `AmazonBedrockErrors.integration.test.ts`    | the `x-amzn-errortype` -> `AuthenticationError.kind` table, against exceptions AWS actually sent, plus the signing path with no session token     |
+| `AmazonBedrockTools.integration.test.ts`     | the tool round-trip: a `toolResult` sent back to Converse against the `toolUse` it answers                                                        |
+| `AmazonBedrockReasoning.integration.test.ts` | extended thinking via `additionalModelRequestFields`: the `reasoningContent` decode, the `signature` round-trip, reasoning deltas over the stream |
 
 They have already earned their keep twice. The document suite caught Converse rejecting
 every uncited `text/*` document, because a `text` document source is only accepted alongside
