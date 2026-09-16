@@ -1692,4 +1692,71 @@ describe("AmazonBedrockLanguageModel", () => {
         })
       }))
   })
+  describe("additionalModelRequestFields", () => {
+    const reasoningConfig = { thinking: { type: "enabled", budget_tokens: 1024 } }
+
+    it.effect("carries the configured fields into the Converse request", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(jsonResponse(request, {
+            output: { message: { role: "assistant", content: [{ text: "Hi" }] } },
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            stopReason: "end_turn"
+          }))
+        }
+
+        yield* LanguageModel.generateText({ prompt: "Hello" }).pipe(
+          AmazonBedrockLanguageModel.withConfigOverride({
+            additionalModelRequestFields: reasoningConfig,
+            inferenceConfig: { maxTokens: 2048 }
+          }),
+          Effect.provide(layersFor(handler))
+        )
+
+        const body = yield* getRequestBody(captured!)
+        assert.deepStrictEqual(body.additionalModelRequestFields, reasoningConfig)
+      }))
+
+    it.effect("carries the configured fields into the converse-stream request", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(binaryResponse(request, concat(happyPathFrames)))
+        }
+
+        yield* LanguageModel.streamText({ prompt: "Hello" }).pipe(
+          Stream.runDrain,
+          AmazonBedrockLanguageModel.withConfigOverride({
+            additionalModelRequestFields: reasoningConfig
+          }),
+          Effect.provide(layersFor(handler))
+        )
+
+        const body = yield* getRequestBody(captured!)
+        assert.deepStrictEqual(body.additionalModelRequestFields, reasoningConfig)
+      }))
+
+    it.effect("omits the key entirely when no fields are configured", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(jsonResponse(request, {
+            output: { message: { role: "assistant", content: [{ text: "Hi" }] } },
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            stopReason: "end_turn"
+          }))
+        }
+
+        yield* LanguageModel.generateText({ prompt: "Hello" }).pipe(
+          Effect.provide(layersFor(handler))
+        )
+
+        const body = yield* getRequestBody(captured!)
+        assert.notProperty(body, "additionalModelRequestFields")
+      }))
+  })
 })

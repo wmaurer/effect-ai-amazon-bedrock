@@ -111,4 +111,20 @@ describe("AmazonBedrockSchema", () => {
       assert.strictEqual(decoded.context, "A quarterly earnings report. Prefer the tables over the prose.")
       assert.isUndefined(decoded.citations)
     }))
+
+  it.effect("round-trips additionalModelRequestFields on a ConverseRequest", () =>
+    Effect.gen(function*() {
+      const fields = { thinking: { type: "enabled", budget_tokens: 1024 } }
+      const encoded = yield* Schema.encodeEffect(AmazonBedrockSchema.ConverseRequest)(
+        new AmazonBedrockSchema.ConverseRequest({
+          modelId: "m",
+          messages: [],
+          additionalModelRequestFields: fields
+        })
+      )
+      assert.deepStrictEqual(encoded.additionalModelRequestFields, fields)
+
+      const decoded = yield* Schema.decodeUnknownEffect(AmazonBedrockSchema.ConverseRequest)(encoded)
+      assert.deepStrictEqual(decoded.additionalModelRequestFields, fields)
+    }))
 })

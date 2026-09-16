@@ -471,6 +471,33 @@ const reasoningTextInfo = (signature: string | undefined): ReasoningInfo => ({
 /**
  * Per-request configuration for the Amazon Bedrock language model.
  *
+ * **Details**
+ *
+ * Derived from `ConverseRequest`, minus the fields built from the prompt, so
+ * every Converse request parameter is settable per request. That includes
+ * `additionalModelRequestFields`, which carries inference parameters specific
+ * to the target model — among them extended thinking on Anthropic models. The
+ * thinking budget is drawn from the same ceiling as the visible answer, so
+ * `inferenceConfig.maxTokens` must exceed `budget_tokens`.
+ *
+ * **Example**
+ *
+ * ```ts
+ * import { AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
+ * import { LanguageModel } from "effect/unstable/ai"
+ *
+ * const answer = LanguageModel.generateText({
+ *   prompt: "How many r's are in strawberry?"
+ * }).pipe(
+ *   AmazonBedrockLanguageModel.withConfigOverride({
+ *     additionalModelRequestFields: {
+ *       thinking: { type: "enabled", budget_tokens: 1024 }
+ *     },
+ *     inferenceConfig: { maxTokens: 4096 }
+ *   })
+ * )
+ * ```
+ *
  * @category configuration
  * @since 4.0.0
  */

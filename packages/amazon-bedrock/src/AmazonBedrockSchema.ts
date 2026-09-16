@@ -471,6 +471,15 @@ export class ToolConfiguration extends Schema.Class<ToolConfiguration>(makeIdent
 /**
  * The request payload for the Converse and ConverseStream operations.
  *
+ * `additionalModelRequestFields` carries inference parameters that are specific
+ * to the target model, beyond the base set Converse exposes through
+ * `inferenceConfig`. AWS models it as a free-form document, and it is kept
+ * free-form here: its shape is defined by the model, not by Converse. Extended
+ * thinking on an Anthropic model is enabled through it, and the thinking budget
+ * is drawn from the same ceiling as the visible answer, so
+ * `inferenceConfig.maxTokens` must exceed it. See
+ * {@link AmazonBedrockLanguageModel.Config} for a worked example.
+ *
  * @category schemas
  * @since 4.0.0
  */
@@ -479,7 +488,8 @@ export class ConverseRequest extends Schema.Class<ConverseRequest>(makeIdentifie
   messages: Schema.Array(Message),
   system: Schema.optional(Schema.Array(SystemContentBlock)),
   toolConfig: Schema.optionalKey(ToolConfiguration),
-  inferenceConfig: Schema.optional(InferenceConfiguration)
+  inferenceConfig: Schema.optional(InferenceConfiguration),
+  additionalModelRequestFields: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
 }) {}
 
 // =============================================================================
