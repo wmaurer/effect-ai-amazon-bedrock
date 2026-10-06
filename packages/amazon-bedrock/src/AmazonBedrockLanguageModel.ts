@@ -18,6 +18,14 @@
  *
  * @since 4.0.0
  */
+import * as AiError from "effect/ai/AiError"
+import { toCodecAnthropic } from "effect/ai/AnthropicStructuredOutput"
+import * as IdGenerator from "effect/ai/IdGenerator"
+import * as LanguageModel from "effect/ai/LanguageModel"
+import * as AiModel from "effect/ai/Model"
+import type * as Prompt from "effect/ai/Prompt"
+import type * as Response from "effect/ai/Response"
+import * as Tool from "effect/ai/Tool"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -30,14 +38,6 @@ import type * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
 import * as Stream from "effect/Stream"
 import type { Mutable, Simplify } from "effect/Types"
-import * as AiError from "effect/ai/AiError"
-import { toCodecAnthropic } from "effect/ai/AnthropicStructuredOutput"
-import * as IdGenerator from "effect/ai/IdGenerator"
-import * as LanguageModel from "effect/ai/LanguageModel"
-import * as AiModel from "effect/ai/Model"
-import type * as Prompt from "effect/ai/Prompt"
-import type * as Response from "effect/ai/Response"
-import * as Tool from "effect/ai/Tool"
 import { AmazonBedrockClient } from "./AmazonBedrockClient.ts"
 import type {
   CachePointBlock,

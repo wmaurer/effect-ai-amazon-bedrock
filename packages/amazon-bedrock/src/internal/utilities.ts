@@ -1,5 +1,5 @@
-import * as Predicate from "effect/Predicate"
 import type * as Response from "effect/ai/Response"
+import * as Predicate from "effect/Predicate"
 import type { StopReason } from "../AmazonBedrockSchema.ts"
 
 const finishReasonMap: Record<StopReason, Response.FinishReason> = {
