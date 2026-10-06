@@ -50,7 +50,7 @@ with-aws -r eu-west-1 env EFFECT_INTEGRATION_TESTS=1 \
 Without `with-aws`, export `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
 `AWS_SESSION_TOKEN` (only for temporary `ASIA…` credentials) and `AWS_REGION` yourself.
 
-`--no-file-parallelism` is not optional. Each suite is declared `{ sequential: true }`, but vitest
+`--no-file-parallelism` is not optional. Each suite is declared `{ concurrent: false }`, but vitest
 still runs the files concurrently, and the resulting burst exceeds the on-demand
 tokens-per-minute quota for Sonnet 4.5 in `eu-west-1` — runs without it fail two or three
 tests with `RateLimitError`, at random. That is an account quota, not a provider defect.

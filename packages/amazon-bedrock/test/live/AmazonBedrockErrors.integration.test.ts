@@ -50,7 +50,7 @@ const authenticationFailure = (
     return error.reason as typeof AiError.AuthenticationError.Type
   })
 
-describe.skipIf(liveDisabled)("Amazon Bedrock authentication errors (live)", { sequential: true }, () => {
+describe.skipIf(liveDisabled)("Amazon Bedrock authentication errors (live)", { concurrent: false }, () => {
   it.effect("classifies an unknown access key id as InvalidKey", () =>
     Effect.gen(function*() {
       const reason = yield* authenticationFailure(

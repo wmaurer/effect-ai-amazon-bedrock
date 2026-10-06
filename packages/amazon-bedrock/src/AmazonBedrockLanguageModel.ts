@@ -21,7 +21,7 @@
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import * as Base64 from "effect/encoding/Base64"
 import { dual } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
@@ -694,7 +694,7 @@ const fileSource: (
     }
     return { s3Location: { uri: url.toString() } }
   }
-  return { bytes: typeof data === "string" ? data : Encoding.encodeBase64(data) }
+  return { bytes: typeof data === "string" ? data : Base64.encode(data) }
 })
 
 /**
@@ -723,7 +723,7 @@ const documentSource: (
     if (data instanceof Uint8Array) {
       return { text: new TextDecoder().decode(data) }
     }
-    const decoded = Encoding.decodeBase64String(data as string)
+    const decoded = Base64.decodeString(data as string)
     if (Result.isFailure(decoded)) {
       return yield* AiError.make({
         module: "AmazonBedrockLanguageModel",

@@ -17,7 +17,7 @@ import { liveDisabled, modelLayer } from "./helpers.ts"
 
 const TIMEOUT = 120_000
 
-describe.skipIf(liveDisabled)("Amazon Bedrock tool results (live)", { sequential: true }, () => {
+describe.skipIf(liveDisabled)("Amazon Bedrock tool results (live)", { concurrent: false }, () => {
   it.effect("sends a tool result back and gets an answer built from it", () =>
     Effect.gen(function*() {
       const GetTemperature = Tool.make("get_temperature", {

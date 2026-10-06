@@ -12,7 +12,7 @@ import { assertDisjointUsage, captureRawUsage, liveDisabled, modelLayer } from "
 
 const TIMEOUT = 120_000
 
-describe.skipIf(liveDisabled)("Amazon Bedrock (live)", { sequential: true }, () => {
+describe.skipIf(liveDisabled)("Amazon Bedrock (live)", { concurrent: false }, () => {
   it.effect("generateText round-trips against the Converse API", () =>
     Effect.gen(function*() {
       const response = yield* LanguageModel.generateText({ prompt: "Reply with exactly: ok" })

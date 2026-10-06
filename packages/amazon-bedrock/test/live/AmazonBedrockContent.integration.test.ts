@@ -39,7 +39,7 @@ Depot capacity is reviewed whenever a depot exceeds 4,000 pallets in a single mo
 
 const toBase64 = (text: string) => globalThis.btoa(globalThis.String.fromCharCode(...new TextEncoder().encode(text)))
 
-describe.skipIf(liveDisabled)("Amazon Bedrock content blocks (live)", { sequential: true }, () => {
+describe.skipIf(liveDisabled)("Amazon Bedrock content blocks (live)", { concurrent: false }, () => {
   it.effect("sends an image block that the model can actually read", () =>
     Effect.gen(function*() {
       const response = yield* LanguageModel.generateText({

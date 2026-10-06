@@ -45,7 +45,7 @@ const reasoningConfig = {
 const PROMPT = "A rope burns unevenly end to end in exactly 60 minutes. " +
   "Using two such ropes, how do you measure 45 minutes? Think it through, then answer."
 
-describe.skipIf(liveDisabled)("Amazon Bedrock reasoning (live)", { sequential: true }, () => {
+describe.skipIf(liveDisabled)("Amazon Bedrock reasoning (live)", { concurrent: false }, () => {
   it.effect("returns a signed reasoning part when extended thinking is enabled", () =>
     Effect.gen(function*() {
       const response = yield* LanguageModel.generateText({ prompt: PROMPT }).pipe(
