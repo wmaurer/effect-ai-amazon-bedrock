@@ -6,7 +6,7 @@
  */
 import { AmazonBedrockClient, AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
 import { Effect, Layer, Redacted } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 
 /**
  * Sonnet 4.5 via the EU geo inference profile. The bare foundation-model id is rejected —

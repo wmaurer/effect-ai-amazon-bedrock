@@ -12,8 +12,8 @@
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { Response } from "effect/unstable/ai"
-import { LanguageModel, Prompt } from "effect/unstable/ai"
+import type { Response } from "effect/ai"
+import { LanguageModel, Prompt } from "effect/ai"
 import { liveDisabled, modelLayer } from "./helpers.ts"
 
 const TIMEOUT = 120_000

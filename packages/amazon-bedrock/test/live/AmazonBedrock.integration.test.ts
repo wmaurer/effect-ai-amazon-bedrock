@@ -7,7 +7,7 @@
 import { AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { LanguageModel, Prompt } from "effect/unstable/ai"
+import { LanguageModel, Prompt } from "effect/ai"
 import { assertDisjointUsage, captureRawUsage, liveDisabled, modelLayer } from "./helpers.ts"
 
 const TIMEOUT = 120_000

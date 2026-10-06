@@ -14,7 +14,7 @@
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Redacted } from "effect"
-import { AiError, LanguageModel } from "effect/unstable/ai"
+import { AiError, LanguageModel } from "effect/ai"
 import { brokenCredentialsLayer, liveDisabled, unsignedLayer } from "./helpers.ts"
 
 const TIMEOUT = 60_000

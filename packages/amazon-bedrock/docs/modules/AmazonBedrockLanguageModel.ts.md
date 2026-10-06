@@ -247,7 +247,7 @@ cacheable prefix rather than every tool in the toolkit.
 ```ts
 import { AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
 import { Schema } from "effect"
-import { Tool } from "effect/unstable/ai"
+import { Tool } from "effect/ai"
 
 const search = Tool.make("search", {
   parameters: Schema.Struct({ query: Schema.String })
