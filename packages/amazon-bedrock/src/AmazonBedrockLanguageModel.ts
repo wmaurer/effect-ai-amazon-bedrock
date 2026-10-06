@@ -6,8 +6,13 @@
  *
  * Text, tool calling, and tool-result messages are supported in both the
  * streaming and non-streaming paths. Structured output is supported for
- * non-streaming requests via forced tool use, since Converse has no native
- * json_schema mode. Reasoning is surfaced on both paths, and reasoning blocks
+ * non-streaming requests via Converse's native `outputConfig.textFormat`
+ * json_schema mode, where it can be combined with the caller's own tools. On
+ * models without native support (detected from the model id, overridable with
+ * `Config.structuredOutputs`) the object is asked for through a tool instead:
+ * forced where the model accepts a forced `toolChoice`, and otherwise left
+ * unforced with an instruction to call it, since Claude Opus 5.5 and later
+ * reject forcing. Reasoning is surfaced on both paths, and reasoning blocks
  * round-trip into later turns when they carry the Bedrock signature. Image and
  * document file parts are converted into Converse `image` / `document` blocks;
  * a media type Converse does not accept fails loudly with
@@ -52,6 +57,7 @@ import type {
   ImageBlock,
   MediaSource,
   Message,
+  OutputConfig,
   SystemContentBlock,
   Tool as BedrockTool,
   ToolChoice,
@@ -504,12 +510,38 @@ const reasoningTextInfo = (signature: string | undefined): ReasoningInfo => ({
 export class Config extends Context.Service<
   Config,
   Simplify<
-    Partial<
+    & Partial<
       Omit<
         typeof ConverseRequest.Encoded,
-        "messages" | "system"
+        "messages" | "system" | "outputConfig"
       >
     >
+    & {
+      /**
+       * Output configuration for the request.
+       *
+       * **Details**
+       *
+       * Only `effort` is exposed: `textFormat` stays owned by the provider,
+       * which derives it from the response format.
+       */
+      readonly outputConfig?: {
+        readonly effort?: string | undefined
+      } | undefined
+      /**
+       * Whether the model supports native structured output
+       * (`outputConfig.textFormat`).
+       *
+       * **Details**
+       *
+       * Overrides automatic capability detection based on the model
+       * identifier. When `false`, `generateObject` asks for the object through
+       * a tool instead, which is forced on models that accept a forced
+       * `toolChoice` and left unforced, with an instruction to call it, on
+       * models that do not. Never sent to Bedrock.
+       */
+      readonly structuredOutputs?: boolean | undefined
+    }
   >
 >()("@wmaurer/effect-ai-amazon-bedrock/AmazonBedrockLanguageModel/Config") {}
 
@@ -552,36 +584,72 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
       readonly documents: ReadonlyArray<CitedDocument>
     }, AiError.AiError> {
       const services = yield* Effect.context<never>()
-      const config = { modelId: model, ...providerConfig, ...services.mapUnsafe.get(Config.key) }
-      const { documents, messages, system } = yield* prepareMessages(options)
-      const { nameMapper, toolConfig } = yield* prepareTools(options)
+      const { structuredOutputs, ...config } = {
+        modelId: model,
+        ...providerConfig,
+        ...services.mapUnsafe.get(Config.key)
+      }
+      const modelId = config.modelId ?? model
+      const capabilities = getModelCapabilities(modelId)
+      const prepared = yield* prepareMessages(options)
+      const { documents, messages } = prepared
+      let system = prepared.system
+      let { nameMapper, toolConfig } = yield* prepareTools(options)
       const responseFormat = options.responseFormat
 
-      let jsonToolConfig: typeof ToolConfiguration.Encoded | undefined = undefined
+      let outputConfig: typeof OutputConfig.Encoded | undefined = config.outputConfig
       if (responseFormat.type === "json") {
         const json = yield* tryJsonSchema(responseFormat.schema, "makeRequest")
-        jsonToolConfig = {
-          tools: [{
-            toolSpec: {
-              name: responseFormat.objectName,
-              description: SchemaAST.resolveDescription(responseFormat.schema.ast) ?? "Respond with a JSON object",
-              inputSchema: { json: json as Record<string, unknown> }
+        const description = SchemaAST.resolveDescription(responseFormat.schema.ast)
+        if (structuredOutputs ?? capabilities.supportsStructuredOutput) {
+          // Native structured output. The caller's own tools still go out
+          // alongside it.
+          outputConfig = {
+            ...outputConfig,
+            textFormat: {
+              type: "json_schema",
+              structure: {
+                jsonSchema: {
+                  schema: JSON.stringify(json),
+                  name: responseFormat.objectName,
+                  ...(Predicate.isNotUndefined(description) ? { description } : {})
+                }
+              }
             }
-          }],
-          toolChoice: { tool: { name: responseFormat.objectName } }
+          }
+        } else {
+          // The object is asked for through a tool, which replaces the
+          // caller's tools. Claude Opus 5.5 and later reject a forced
+          // `toolChoice` with a 400, so on those models the tool is left
+          // unforced and the request says to call it.
+          nameMapper = new Tool.NameMapper([])
+          toolConfig = {
+            tools: [{
+              toolSpec: {
+                name: responseFormat.objectName,
+                description: description ?? "Respond with a JSON object",
+                inputSchema: { json: json as Record<string, unknown> }
+              }
+            }],
+            toolChoice: capabilities.supportsForcedToolChoice
+              ? { tool: { name: responseFormat.objectName } }
+              : { auto: {} }
+          }
+          if (!capabilities.supportsForcedToolChoice) {
+            system = [...(system ?? []), {
+              text: `Respond only by calling the \`${responseFormat.objectName}\` tool. Do not answer in text.`
+            }]
+          }
         }
       }
 
       const request: typeof ConverseRequest.Encoded = {
         ...config,
-        modelId: config.modelId!,
+        modelId,
         system,
         messages,
-        ...(Predicate.isNotUndefined(jsonToolConfig)
-          ? { toolConfig: jsonToolConfig }
-          : Predicate.isNotUndefined(toolConfig)
-          ? { toolConfig }
-          : {})
+        ...(Predicate.isNotUndefined(outputConfig) ? { outputConfig } : {}),
+        ...(Predicate.isNotUndefined(toolConfig) ? { toolConfig } : {})
       }
       return { request, nameMapper, documents }
     }
@@ -981,6 +1049,46 @@ const tryToolJsonSchema = (tool: Tool.Any, method: string) =>
     catch: (error) => unsupportedSchemaError(error, method)
   })
 
+interface ModelCapabilities {
+  readonly supportsStructuredOutput: boolean
+  readonly supportsForcedToolChoice: boolean
+}
+
+/**
+ * Returns what a model accepts for structured output, optimistically assuming
+ * modern capabilities for unknown IDs. Matched by substring, so foundation
+ * model ids and inference profile ids (`eu.anthropic.…`) both resolve.
+ *
+ * - Claude models before Opus 4.1 / Sonnet 4.5 predate structured output, as
+ *   in the Anthropic provider.
+ * - Claude Opus 5.5 supports structured output on the Anthropic API, but
+ *   Bedrock rejects `outputConfig.textFormat` for it with `output_config.format:
+ *   Extra inputs are not permitted` (seen live on 2026-10-06). Override with
+ *   `Config.structuredOutputs` once Bedrock catches up.
+ * - Claude Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 reject a forced
+ *   `toolChoice` (`tool` or `any`) with a 400.
+ *
+ * @see https://platform.claude.com/docs/en/build-with-claude/structured-outputs
+ */
+const getModelCapabilities = (modelId: string): ModelCapabilities => {
+  const supportsForcedToolChoice = !(
+    modelId.includes("claude-opus-5-5") ||
+    modelId.includes("claude-sonnet-5-5") ||
+    modelId.includes("claude-fable-5-1") ||
+    modelId.includes("claude-mythos-5-1")
+  )
+  const supportsStructuredOutput = !(
+    modelId.includes("claude-opus-5-5") ||
+    modelId.includes("claude-sonnet-4-0") ||
+    modelId.includes("claude-sonnet-4-20250514") ||
+    modelId.includes("claude-3-7-sonnet") ||
+    modelId.includes("claude-opus-4-0") ||
+    modelId.includes("claude-opus-4-20250514") ||
+    modelId.includes("claude-3-")
+  )
+  return { supportsStructuredOutput, supportsForcedToolChoice }
+}
+
 const tryJsonSchema = (schema: Schema.Top, method: string) =>
   Effect.try({
     try: () => Tool.getJsonSchemaFromSchema(schema, { transformer: toCodecAnthropic }),
@@ -1090,6 +1198,14 @@ const makeResponse: (
 > = Effect.fnUntraced(function*(request, response, options, nameMapper, documents) {
   const idGenerator = yield* IdGenerator.IdGenerator
   const parts: Array<Response.PartEncoded> = []
+  // Without native structured output the object is asked for through a tool
+  // named after it (see `makeRequest`).
+  const objectToolName = options.responseFormat.type === "json" &&
+      Predicate.isUndefined(request.outputConfig?.textFormat)
+    ? options.responseFormat.objectName
+    : undefined
+  const hasObjectTool = Predicate.isNotUndefined(objectToolName) &&
+    response.output.message.content.some((part) => part.toolUse?.name === objectToolName)
 
   parts.push({
     type: "response-metadata",
@@ -1105,31 +1221,33 @@ const makeResponse: (
 
   for (const part of response.output.message.content) {
     if (Predicate.isNotUndefined(part.text)) {
-      // Suppress plain text while in structured-output mode (the object arrives
-      // as a forced tool-use block below).
-      if (options.responseFormat.type === "text") {
+      // With native structured output the object arrives here, as JSON text the
+      // LanguageModel layer decodes. When the object tool was called instead,
+      // prose next to it must not be concatenated into the JSON. When it was
+      // not, the text is kept and decoded as the object.
+      if (!hasObjectTool) {
         parts.push({
           type: "text",
           text: part.text
         })
       }
     } else if (Predicate.isNotUndefined(part.toolUse)) {
-      if (options.responseFormat.type === "json") {
-        // Structured output: re-emit the tool input as text for the LanguageModel
-        // layer to validate against the schema.
+      if (part.toolUse.name === objectToolName) {
+        // The object tool's input is the object: re-emit it as text for the
+        // LanguageModel layer to decode.
         parts.push({
           type: "text",
           text: JSON.stringify(part.toolUse.input)
         })
-      } else {
-        parts.push({
-          type: "tool-call",
-          id: part.toolUse.toolUseId,
-          name: nameMapper.getCustomName(part.toolUse.name),
-          params: part.toolUse.input,
-          providerExecuted: false
-        })
+        continue
       }
+      parts.push({
+        type: "tool-call",
+        id: part.toolUse.toolUseId,
+        name: nameMapper.getCustomName(part.toolUse.name),
+        params: part.toolUse.input,
+        providerExecuted: false
+      })
     } else if (Predicate.isNotUndefined(part.reasoningContent)) {
       const reasoningText = part.reasoningContent.reasoningText
       if (Predicate.isNotUndefined(reasoningText)) {
@@ -1152,12 +1270,11 @@ const makeResponse: (
       }
     } else if (Predicate.isNotUndefined(part.citationsContent)) {
       // Once a document has citations enabled the answer text arrives inside
-      // this block instead of a plain `text` block, so it is emitted here too.
-      if (options.responseFormat.type === "text") {
-        for (const generated of part.citationsContent.content ?? []) {
-          if (Predicate.isNotUndefined(generated.text)) {
-            parts.push({ type: "text", text: generated.text })
-          }
+      // this block instead of a plain `text` block, so it is emitted here too,
+      // under the same rule as a plain `text` block.
+      for (const generated of part.citationsContent.content ?? []) {
+        if (!hasObjectTool && Predicate.isNotUndefined(generated.text)) {
+          parts.push({ type: "text", text: generated.text })
         }
       }
       for (const citation of part.citationsContent.citations ?? []) {
@@ -1171,7 +1288,11 @@ const makeResponse: (
     // with every field undefined and are ignored.
   }
 
-  const finishReason = InternalUtilities.resolveFinishReason(response.stopReason)
+  // Calling the object tool is how the model finishes, not a request to run a
+  // tool.
+  const finishReason = hasObjectTool && response.stopReason === "tool_use"
+    ? "stop"
+    : InternalUtilities.resolveFinishReason(response.stopReason)
   const cacheReadTokens = response.usage.cacheReadInputTokens ?? 0
   const cacheWriteTokens = response.usage.cacheWriteInputTokens ?? 0
 

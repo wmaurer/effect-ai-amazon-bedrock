@@ -47,9 +47,10 @@ const binaryResponse = (
 const layersFor = (
   handler: (
     request: HttpClientRequest.HttpClientRequest
-  ) => Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>
+  ) => Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>,
+  model = "us.test.model-v1:0"
 ) =>
-  AmazonBedrockLanguageModel.layer({ model: "us.test.model-v1:0" }).pipe(
+  AmazonBedrockLanguageModel.layer({ model }).pipe(
     Layer.provide(AmazonBedrockClient.layer({
       accessKeyId: "AKIA_TEST",
       secretAccessKey: Redacted.make("test-secret"),
@@ -1253,53 +1254,48 @@ describe("AmazonBedrockLanguageModel", () => {
   })
 
   describe("generateObject", () => {
-    it.effect("forces a synthetic tool and extracts the structured result", () =>
+    const objectResponse = (request: HttpClientRequest.HttpClientRequest, content: ReadonlyArray<unknown>) =>
+      jsonResponse(request, {
+        output: { message: { role: "assistant", content } },
+        usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+        stopReason: "end_turn"
+      })
+
+    it.effect("requests native structured output and decodes the text block", () =>
       Effect.gen(function*() {
         let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
         const handler = (request: HttpClientRequest.HttpClientRequest) => {
           captured = request
-          return Effect.succeed(jsonResponse(request, {
-            output: {
-              message: {
-                role: "assistant",
-                content: [{ toolUse: { toolUseId: "tu_1", name: "person", input: { name: "Ada", age: 36 } } }]
-              }
-            },
-            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
-            stopReason: "tool_use"
-          }))
+          return Effect.succeed(objectResponse(request, [{ text: "{\"name\":\"Ada\",\"age\":36}" }]))
         }
 
         const result = yield* LanguageModel.generateObject({
           prompt: "Give me a person",
           objectName: "person",
-          schema: Schema.Struct({ name: Schema.String, age: Schema.Number })
+          schema: Schema.Struct({ name: Schema.String, age: Schema.Number }).annotate({ description: "A person" })
         }).pipe(Effect.provide(layersFor(handler)))
 
         assert.deepStrictEqual(result.value, { name: "Ada", age: 36 })
 
         const body = yield* getRequestBody(captured!)
-        assert.strictEqual(body.toolConfig.tools.length, 1)
-        assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "person")
-        assert.strictEqual(body.toolConfig.toolChoice.tool.name, "person")
-        assert.strictEqual(body.toolConfig.tools[0].toolSpec.inputSchema.json.type, "object")
+        // Claude Opus 5.5 and later reject a forced `toolChoice` with a 400, so json mode
+        // must not fall back to a synthetic tool.
+        assert.isUndefined(body.toolConfig)
+        const textFormat = body.outputConfig.textFormat
+        assert.strictEqual(textFormat.type, "json_schema")
+        assert.strictEqual(textFormat.structure.jsonSchema.name, "person")
+        assert.strictEqual(textFormat.structure.jsonSchema.description, "A person")
+        // Converse models the schema as a string, not a document.
+        assert.strictEqual(typeof textFormat.structure.jsonSchema.schema, "string")
+        assert.strictEqual(JSON.parse(textFormat.structure.jsonSchema.schema).type, "object")
       }))
 
-    it.effect("renders union and nullable fields in the forced tool schema", () =>
+    it.effect("renders union and nullable fields in the output schema", () =>
       Effect.gen(function*() {
         let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
         const handler = (request: HttpClientRequest.HttpClientRequest) => {
           captured = request
-          return Effect.succeed(jsonResponse(request, {
-            output: {
-              message: {
-                role: "assistant",
-                content: [{ toolUse: { toolUseId: "tu_1", name: "finding", input: { line: 12, owner: null } } }]
-              }
-            },
-            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
-            stopReason: "tool_use"
-          }))
+          return Effect.succeed(objectResponse(request, [{ text: "{\"line\":12,\"owner\":null}" }]))
         }
 
         yield* LanguageModel.generateObject({
@@ -1309,16 +1305,188 @@ describe("AmazonBedrockLanguageModel", () => {
             line: Schema.Union([Schema.Int, Schema.String]),
             owner: Schema.NullOr(Schema.Int)
           })
-        }).pipe(Effect.provide(layersFor(handler)), Effect.ignore)
+        }).pipe(Effect.provide(layersFor(handler)))
 
         const body = yield* getRequestBody(captured!)
-        const props = body.toolConfig.tools[0].toolSpec.inputSchema.json.properties
+        const props = JSON.parse(body.outputConfig.textFormat.structure.jsonSchema.schema).properties
         // The exact JSON-Schema encoding is whatever `toCodecAnthropic` produces;
         // assert the union/nullable members survive in some accepted form.
         assert.include(JSON.stringify(props.line), "integer")
         assert.include(JSON.stringify(props.line), "string")
         assert.include(JSON.stringify(props.owner), "integer")
         assert.include(JSON.stringify(props.owner), "null")
+      }))
+
+    it.effect("keeps other outputConfig fields from the config alongside the text format", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(objectResponse(request, [{ text: "{\"ok\":true}" }]))
+        }
+
+        yield* LanguageModel.generateObject({
+          prompt: "x",
+          objectName: "result",
+          schema: Schema.Struct({ ok: Schema.Boolean })
+        }).pipe(
+          AmazonBedrockLanguageModel.withConfigOverride({ outputConfig: { effort: "low" } }),
+          Effect.provide(layersFor(handler))
+        )
+
+        const body = yield* getRequestBody(captured!)
+        assert.strictEqual(body.outputConfig.effort, "low")
+        assert.strictEqual(body.outputConfig.textFormat.type, "json_schema")
+      }))
+
+    describe("on a model without native structured output", () => {
+      const Answer = Schema.Struct({ answer: Schema.Number })
+
+      it.effect("asks for an unforced tool when the model rejects a forced one", () =>
+        Effect.gen(function*() {
+          let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+          const handler = (request: HttpClientRequest.HttpClientRequest) => {
+            captured = request
+            return Effect.succeed(jsonResponse(request, {
+              output: {
+                message: {
+                  role: "assistant",
+                  content: [
+                    { text: "Here is the answer." },
+                    { toolUse: { toolUseId: "tu_1", name: "Answer", input: { answer: 4 } } }
+                  ]
+                }
+              },
+              usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+              stopReason: "tool_use"
+            }))
+          }
+
+          const result = yield* LanguageModel.generateObject({
+            prompt: "2 + 2?",
+            objectName: "Answer",
+            schema: Answer
+          }).pipe(Effect.provide(layersFor(handler, "eu.anthropic.claude-opus-5-5")))
+
+          // The tool input is the object; the prose next to it is not concatenated in.
+          assert.deepStrictEqual(result.value, { answer: 4 })
+          assert.strictEqual(result.finishReason, "stop")
+
+          const body = yield* getRequestBody(captured!)
+          assert.isUndefined(body.outputConfig)
+          assert.strictEqual(body.toolConfig.tools.length, 1)
+          assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "Answer")
+          assert.deepStrictEqual(body.toolConfig.toolChoice, { auto: {} })
+          // An unforced tool is only a suggestion, so the request says to call it.
+          assert.include(body.system.at(-1).text, "Answer")
+        }))
+
+      it.effect("decodes a text reply when the model skips the unforced tool", () =>
+        Effect.gen(function*() {
+          const handler = (request: HttpClientRequest.HttpClientRequest) =>
+            Effect.succeed(objectResponse(request, [{ text: "{\"answer\":4}" }]))
+
+          const result = yield* LanguageModel.generateObject({
+            prompt: "2 + 2?",
+            objectName: "Answer",
+            schema: Answer
+          }).pipe(Effect.provide(layersFor(handler, "eu.anthropic.claude-opus-5-5")))
+
+          assert.deepStrictEqual(result.value, { answer: 4 })
+        }))
+
+      it.effect("forces the tool on a model that accepts a forced one", () =>
+        Effect.gen(function*() {
+          let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+          const handler = (request: HttpClientRequest.HttpClientRequest) => {
+            captured = request
+            return Effect.succeed(objectResponse(request, [
+              { toolUse: { toolUseId: "tu_1", name: "Answer", input: { answer: 4 } } }
+            ]))
+          }
+
+          const result = yield* LanguageModel.generateObject({
+            prompt: "2 + 2?",
+            objectName: "Answer",
+            schema: Answer
+          }).pipe(Effect.provide(layersFor(handler, "us.anthropic.claude-3-7-sonnet-20250219-v1:0")))
+
+          assert.deepStrictEqual(result.value, { answer: 4 })
+          const body = yield* getRequestBody(captured!)
+          assert.isUndefined(body.outputConfig)
+          assert.deepStrictEqual(body.toolConfig.toolChoice, { tool: { name: "Answer" } })
+        }))
+    })
+
+    it.effect("lets structuredOutputs override the model detection, and keeps it off the wire", () =>
+      Effect.gen(function*() {
+        const bodies: Array<any> = []
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.map(getRequestBody(request), (body) => {
+            bodies.push(body)
+            return objectResponse(request, [{ text: "{\"ok\":true}" }])
+          })
+        const generate = LanguageModel.generateObject({
+          prompt: "x",
+          objectName: "result",
+          schema: Schema.Struct({ ok: Schema.Boolean })
+        })
+
+        // Off on a model detected as supporting it ...
+        yield* generate.pipe(
+          AmazonBedrockLanguageModel.withConfigOverride({ structuredOutputs: false }),
+          Effect.provide(layersFor(handler))
+        )
+        // ... and on for one detected as not supporting it.
+        yield* generate.pipe(
+          AmazonBedrockLanguageModel.withConfigOverride({ structuredOutputs: true }),
+          Effect.provide(layersFor(handler, "eu.anthropic.claude-opus-5-5"))
+        )
+
+        assert.isUndefined(bodies[0].outputConfig)
+        assert.strictEqual(bodies[0].toolConfig.tools[0].toolSpec.name, "result")
+        assert.isUndefined(bodies[1].toolConfig)
+        assert.strictEqual(bodies[1].outputConfig.textFormat.type, "json_schema")
+        for (const body of bodies) {
+          assert.notProperty(body, "structuredOutputs")
+        }
+      }))
+
+    it.effect("emits a toolUse block in json mode as a tool call, not as the object", () =>
+      Effect.gen(function*() {
+        const Lookup = Tool.make("Lookup", {
+          description: "Look something up",
+          parameters: Schema.Struct({ key: Schema.String }),
+          success: Schema.String
+        })
+        const toolkit = Toolkit.make(Lookup)
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(objectResponse(request, [
+            { toolUse: { toolUseId: "tu_1", name: "Lookup", input: { key: "a" } } },
+            { text: "{\"ok\":true}" }
+          ]))
+        }
+
+        const result = yield* LanguageModel.generateObject({
+          prompt: "x",
+          objectName: "result",
+          schema: Schema.Struct({ ok: Schema.Boolean }),
+          toolkit
+        }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(toolkit.toLayer({ Lookup: () => Effect.succeed("found") }))
+        )
+
+        assert.deepStrictEqual(result.value, { ok: true })
+        assert.strictEqual(result.toolCalls.length, 1)
+        assert.strictEqual(result.toolCalls[0].name, "Lookup")
+
+        // The caller's tools still go out, unforced, next to the output format.
+        const body = yield* getRequestBody(captured!)
+        assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "Lookup")
+        assert.isDefined(body.outputConfig.textFormat)
       }))
   })
 

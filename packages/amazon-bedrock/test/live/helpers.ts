@@ -14,6 +14,13 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
  */
 export const MODEL = process.env.BEDROCK_MODEL_ID ?? "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
+/**
+ * Claude Opus 5.5 via the EU geo inference profile. From this generation on, Anthropic models
+ * reject a forced `toolChoice`, so it is the model that proves structured output does not
+ * depend on one.
+ */
+export const OPUS_5_5 = "eu.anthropic.claude-opus-5-5"
+
 export const REGION = process.env.AWS_REGION ?? "eu-west-1"
 
 /**
@@ -42,9 +49,10 @@ const credentials = () => ({
  * body eagerly, which would consume a streaming response before the decoder sees it.
  */
 export const modelLayer = (
-  transformClient?: (client: HttpClient.HttpClient) => HttpClient.HttpClient
+  transformClient?: (client: HttpClient.HttpClient) => HttpClient.HttpClient,
+  model: string = MODEL
 ) =>
-  AmazonBedrockLanguageModel.layer({ model: MODEL }).pipe(
+  AmazonBedrockLanguageModel.layer({ model }).pipe(
     Layer.provide(AmazonBedrockClient.layer({ ...credentials(), transformClient })),
     Layer.provide(FetchHttpClient.layer)
   )

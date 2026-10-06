@@ -15,7 +15,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
 import { Effect, Stream } from "effect"
 import { LanguageModel, Prompt } from "effect/ai"
-import { liveDisabled, modelLayer } from "./helpers.ts"
+import { liveDisabled, MODEL, modelLayer } from "./helpers.ts"
 
 const TIMEOUT = 120_000
 
@@ -34,12 +34,27 @@ const TIMEOUT = 120_000
 const THINKING_BUDGET = 1024
 const MAX_TOKENS = 4096
 
-const reasoningConfig = {
-  additionalModelRequestFields: {
-    thinking: { type: "enabled", budget_tokens: THINKING_BUDGET }
-  },
-  inferenceConfig: { maxTokens: MAX_TOKENS }
-} as const
+/**
+ * Models that reject `{ type: "enabled", budget_tokens }` with a 400 and take adaptive thinking
+ * instead, its depth set by `outputConfig.effort`. Their thinking text is empty unless
+ * `display: "summarized"` asks for it, and these tests assert on that text.
+ */
+const ADAPTIVE_ONLY = /claude-(opus-5|opus-4-[78]|sonnet-5|fable-5|mythos-5)/
+
+const reasoningConfig = ADAPTIVE_ONLY.test(MODEL)
+  ? {
+    additionalModelRequestFields: {
+      thinking: { type: "adaptive", display: "summarized" }
+    },
+    outputConfig: { effort: "high" },
+    inferenceConfig: { maxTokens: MAX_TOKENS }
+  } as const
+  : {
+    additionalModelRequestFields: {
+      thinking: { type: "enabled", budget_tokens: THINKING_BUDGET }
+    },
+    inferenceConfig: { maxTokens: MAX_TOKENS }
+  } as const
 
 /** A question the model cannot answer without working through it first. */
 const PROMPT = "A rope burns unevenly end to end in exactly 60 minutes. " +
@@ -66,8 +81,9 @@ describe.skipIf(liveDisabled)("Amazon Bedrock reasoning (live)", { concurrent: f
       assert.isString((info as { signature: string | null }).signature)
       assert.isAtLeast((info as { signature: string }).signature.length, 1)
 
-      // Thinking tokens are billed as output tokens.
-      assert.isAtLeast(response.usage.outputTokens.total ?? 0, THINKING_BUDGET / 2)
+      // Thinking tokens are billed as output tokens. Adaptive thinking has no budget to
+      // measure against, and decides for itself how much to think.
+      assert.isAtLeast(response.usage.outputTokens.total ?? 0, ADAPTIVE_ONLY.test(MODEL) ? 1 : THINKING_BUDGET / 2)
     }).pipe(Effect.provide(modelLayer())), TIMEOUT)
 
   it.effect("accepts a signed reasoning block sent back in a later turn", () =>

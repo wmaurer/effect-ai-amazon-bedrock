@@ -8,7 +8,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
 import { Effect, Schema } from "effect"
 import { LanguageModel, Prompt } from "effect/ai"
-import { assertDisjointUsage, captureRawUsage, liveDisabled, modelLayer } from "./helpers.ts"
+import { assertDisjointUsage, captureRawUsage, liveDisabled, MODEL, modelLayer, OPUS_5_5 } from "./helpers.ts"
 
 const TIMEOUT = 120_000
 
@@ -20,22 +20,28 @@ describe.skipIf(liveDisabled)("Amazon Bedrock (live)", { concurrent: false }, ()
       assert.isAtLeast(response.usage.outputTokens.total ?? 0, 1)
     }).pipe(Effect.provide(modelLayer())), TIMEOUT)
 
-  it.effect("generateObject decodes a forced tool call into the schema", () =>
-    Effect.gen(function*() {
-      const Finding = Schema.Struct({
-        severity: Schema.Literals(["low", "medium", "high"]),
-        summary: Schema.String
-      })
-      const response = yield* LanguageModel.generateObject({
-        schema: Finding,
-        objectName: "Finding",
-        prompt: "A null pointer dereference crashes the server on every request. Classify it."
-      })
-      // Decoding already proved the shape; assert the model filled it rather than
-      // returning an empty string that happens to satisfy Schema.String.
-      assert.include(["low", "medium", "high"], response.value.severity)
-      assert.isAtLeast(response.value.summary.length, 1)
-    }).pipe(Effect.provide(modelLayer())), TIMEOUT)
+  // Run against the default model and against Opus 5.5, which rejects the forced
+  // `toolChoice` the provider used to send for structured output.
+  it.effect.each([...new Set([MODEL, OPUS_5_5])])(
+    "generateObject decodes native structured output (%s)",
+    (model) =>
+      Effect.gen(function*() {
+        const Finding = Schema.Struct({
+          severity: Schema.Literals(["low", "medium", "high"]),
+          summary: Schema.String
+        })
+        const response = yield* LanguageModel.generateObject({
+          schema: Finding,
+          objectName: "Finding",
+          prompt: "A null pointer dereference crashes the server on every request. Classify it."
+        })
+        // Decoding already proved the shape; assert the model filled it rather than
+        // returning an empty string that happens to satisfy Schema.String.
+        assert.include(["low", "medium", "high"], response.value.severity)
+        assert.isAtLeast(response.value.summary.length, 1)
+      }).pipe(Effect.provide(modelLayer(undefined, model))),
+    TIMEOUT
+  )
 
   it.effect("reports a length finish when the response is cut off at maxTokens", () =>
     Effect.gen(function*() {

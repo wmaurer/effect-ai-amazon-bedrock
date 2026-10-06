@@ -469,6 +469,56 @@ export class ToolConfiguration extends Schema.Class<ToolConfiguration>(makeIdent
 }) {}
 
 /**
+ * A JSON Schema the model's output must conform to.
+ *
+ * `schema` is the JSON Schema serialized to a string: Converse models it as a
+ * `String`, not a document, and rejects an object here.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const JsonSchemaDefinition = Schema.Struct({
+  schema: Schema.String,
+  name: Schema.optionalKey(Schema.String),
+  description: Schema.optionalKey(Schema.String)
+})
+
+/**
+ * The structure the model's output must adhere to. A union on the wire whose
+ * only member today is `jsonSchema`.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const OutputFormatStructure = Schema.Struct({
+  jsonSchema: JsonSchemaDefinition
+})
+
+/**
+ * Structured output parameters for a Converse request.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const OutputFormat = Schema.Struct({
+  type: Schema.Literal("json_schema"),
+  structure: OutputFormatStructure
+})
+
+/**
+ * Output configuration for a Converse request: native structured output
+ * (`textFormat`) and the model's effort level (`effort`, one of `low`,
+ * `medium`, `high`, `xhigh` or `max` on the models that accept it).
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const OutputConfig = Schema.Struct({
+  textFormat: Schema.optionalKey(OutputFormat),
+  effort: Schema.optionalKey(Schema.String)
+})
+
+/**
  * The request payload for the Converse and ConverseStream operations.
  *
  * `additionalModelRequestFields` carries inference parameters that are specific
@@ -489,6 +539,7 @@ export class ConverseRequest extends Schema.Class<ConverseRequest>(makeIdentifie
   system: Schema.optional(Schema.Array(SystemContentBlock)),
   toolConfig: Schema.optionalKey(ToolConfiguration),
   inferenceConfig: Schema.optional(InferenceConfiguration),
+  outputConfig: Schema.optionalKey(OutputConfig),
   additionalModelRequestFields: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
 }) {}
 
