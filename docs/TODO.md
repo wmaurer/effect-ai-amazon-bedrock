@@ -18,6 +18,25 @@ with no caller waiting. `ConverseResponse` here already omits `trace`, `performa
 `serviceTier` by the same selectivity, so leaving this out is consistent rather than an
 oversight. Model both halves together or neither.
 
+## Other `ConverseRequest` fields
+
+The Smithy model gives Converse and ConverseStream the same 13 request members.
+`ConverseRequest` in `AmazonBedrockSchema.ts` models six of them: `modelId`, `messages`,
+`system`, `toolConfig`, `inferenceConfig`, and `additionalModelRequestFields`. The section above
+covers `additionalModelResponseFieldPaths`. The other six are not modelled: `outputConfig`,
+`guardrailConfig`, `promptVariables`, `requestMetadata`, `performanceConfig`, and `serviceTier`.
+
+`AmazonBedrockLanguageModel.Config` is the encoded `ConverseRequest` without `messages` and
+`system`, with every field optional, so the request config has no key for these six. `make`
+spreads the config into the request, so a field added to `ConverseRequest` reaches Bedrock
+through `model`, `layer`, and `withConfigOverride` with no other change.
+
+`outputConfig` needs a decision before it is modelled. Its `textFormat` member takes a JSON
+schema (`type: "json_schema"`), which `generateObject` could send instead of the forced tool call
+it sends today. Its `effort` member sets how much the model reasons. `guardrailConfig` would also
+let the live suites provoke the `content_filtered` and `guardrail_intervened` stop reasons, which
+are still mapped from the Smithy model alone.
+
 ## Video blocks
 
 `VideoBlock` mirrors `ImageBlock` exactly: a format enum (`mkv`, `mov`, `mp4`, `webm`, `flv`,
