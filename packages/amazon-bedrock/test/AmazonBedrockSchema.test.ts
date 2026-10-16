@@ -1,5 +1,5 @@
-import { AmazonBedrockSchema } from "@effect/ai-amazon-bedrock"
 import { assert, describe, it } from "@effect/vitest"
+import { AmazonBedrockSchema } from "@wmaurer/effect-ai-amazon-bedrock"
 import { Effect, Schema } from "effect"
 
 describe("AmazonBedrockSchema", () => {

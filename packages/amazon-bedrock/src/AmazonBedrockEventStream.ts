@@ -36,7 +36,7 @@ const textDecoder = new TextDecoder()
  * @since 4.0.0
  */
 export class EventStreamError extends Schema.TaggedError<EventStreamError>(
-  "@effect/ai-amazon-bedrock/AmazonBedrockEventStream/EventStreamError"
+  "@wmaurer/effect-ai-amazon-bedrock/AmazonBedrockEventStream/EventStreamError"
 )("EventStreamError", {
   code: Schema.optional(Schema.String),
   message: Schema.optional(Schema.String)

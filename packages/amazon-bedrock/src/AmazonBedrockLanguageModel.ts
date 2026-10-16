@@ -102,7 +102,7 @@ export type CachePoint = typeof CachePointBlock.Encoded
  * **Example**
  *
  * ```ts
- * import { AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
+ * import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
  * import { Schema } from "effect"
  * import { Tool } from "effect/ai"
  *
@@ -115,7 +115,7 @@ export type CachePoint = typeof CachePointBlock.Encoded
  * @since 4.0.0
  */
 export const ToolCachePoint = Context.Reference<CachePoint | undefined>(
-  "@effect/ai-amazon-bedrock/AmazonBedrockLanguageModel/ToolCachePoint",
+  "@wmaurer/effect-ai-amazon-bedrock/AmazonBedrockLanguageModel/ToolCachePoint",
   { defaultValue: () => undefined }
 )
 
@@ -483,7 +483,7 @@ const reasoningTextInfo = (signature: string | undefined): ReasoningInfo => ({
  * **Example**
  *
  * ```ts
- * import { AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
+ * import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
  * import { LanguageModel } from "effect/ai"
  *
  * const answer = LanguageModel.generateText({
@@ -511,7 +511,7 @@ export class Config extends Context.Service<
       >
     >
   >
->()("@effect/ai-amazon-bedrock/AmazonBedrockLanguageModel/Config") {}
+>()("@wmaurer/effect-ai-amazon-bedrock/AmazonBedrockLanguageModel/Config") {}
 
 // =============================================================================
 // Language Model

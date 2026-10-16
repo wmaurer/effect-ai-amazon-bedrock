@@ -20,7 +20,7 @@ import type { HttpClient } from "effect/http/HttpClient"
 export class AmazonBedrockConfig extends Context.Service<
   AmazonBedrockConfig,
   AmazonBedrockConfig.Service
->()("@effect/ai-amazon-bedrock/AmazonBedrockConfig") {
+>()("@wmaurer/effect-ai-amazon-bedrock/AmazonBedrockConfig") {
   /**
    * Gets the configured Amazon Bedrock service from the current context when present.
    *

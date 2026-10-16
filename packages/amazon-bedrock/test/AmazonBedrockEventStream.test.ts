@@ -1,5 +1,5 @@
-import { AmazonBedrockEventStream, AmazonBedrockSchema } from "@effect/ai-amazon-bedrock"
 import { assert, describe, it } from "@effect/vitest"
+import { AmazonBedrockEventStream, AmazonBedrockSchema } from "@wmaurer/effect-ai-amazon-bedrock"
 import { Effect, Stream } from "effect"
 import { concat, encodeFrame, eventFrame, exceptionFrame, happyPathFrames } from "./utils.ts"
 

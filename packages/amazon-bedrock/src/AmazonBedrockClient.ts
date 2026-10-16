@@ -76,7 +76,7 @@ export interface Service {
  * @since 4.0.0
  */
 export class AmazonBedrockClient extends Context.Service<AmazonBedrockClient, Service>()(
-  "@effect/ai-amazon-bedrock/AmazonBedrockClient"
+  "@wmaurer/effect-ai-amazon-bedrock/AmazonBedrockClient"
 ) {}
 
 // =============================================================================

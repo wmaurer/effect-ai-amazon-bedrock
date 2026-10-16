@@ -14,7 +14,7 @@
  */
 import * as Schema from "effect/Schema"
 
-const prefix = "@effect/ai-amazon-bedrock"
+const prefix = "@wmaurer/effect-ai-amazon-bedrock"
 
 const makeIdentifier = (name: string) => `${prefix}/${name}`
 

@@ -4,7 +4,7 @@
  * See ./README.md — this whole directory is temporary and comes out before the branch is
  * squashed for the upstream PR.
  */
-import { AmazonBedrockClient, AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
+import { AmazonBedrockClient, AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
 import { Effect, Layer, Redacted } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 

@@ -4,8 +4,8 @@
  * See ./README.md — this whole directory is temporary and comes out before the branch is
  * squashed for the upstream PR.
  */
-import { AmazonBedrockLanguageModel } from "@effect/ai-amazon-bedrock"
 import { assert, describe, it } from "@effect/vitest"
+import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
 import { Effect, Schema } from "effect"
 import { LanguageModel, Prompt } from "effect/ai"
 import { assertDisjointUsage, captureRawUsage, liveDisabled, modelLayer } from "./helpers.ts"

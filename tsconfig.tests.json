@@ -14,8 +14,8 @@
     "resolveJsonModule": true,
     "types": ["node"],
     "paths": {
-      "@effect/ai-amazon-bedrock": ["./packages/amazon-bedrock/src/index.ts"],
-      "@effect/ai-amazon-bedrock/*": ["./packages/amazon-bedrock/src/*.ts"]
+      "@wmaurer/effect-ai-amazon-bedrock": ["./packages/amazon-bedrock/src/index.ts"],
+      "@wmaurer/effect-ai-amazon-bedrock/*": ["./packages/amazon-bedrock/src/*.ts"]
     },
     "plugins": [{
       "name": "@effect/language-service",
