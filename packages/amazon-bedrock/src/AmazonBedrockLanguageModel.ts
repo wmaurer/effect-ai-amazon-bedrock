@@ -21,6 +21,7 @@
  * are opt-in per document, and the citation blocks and deltas Converse returns
  * are surfaced as document source parts.
  *
+ * @stability unstable
  * @since 4.0.0
  */
 import * as AiError from "effect/ai/AiError"
@@ -69,6 +70,7 @@ import * as InternalUtilities from "./internal/utilities.ts"
  * A Bedrock model identifier or cross-region inference profile id (e.g.
  * `us.anthropic.claude-sonnet-4-5-20250929-v1:0`).
  *
+ * @stability unstable
  * @category models
  * @since 4.0.0
  */
@@ -87,6 +89,7 @@ export type Model = string & {}
  * this becomes a `cachePoint` block appended after the content it covers.
  * Omitting `ttl` leaves the cache lifetime to Bedrock.
  *
+ * @stability unstable
  * @category models
  * @since 4.0.0
  */
@@ -105,7 +108,7 @@ export type CachePoint = typeof CachePointBlock.Encoded
  * `messages`, and `tools` combined, so annotate the tool at the end of the
  * cacheable prefix rather than every tool in the toolkit.
  *
- * **Example**
+ * **Example** (Caching a tool definition)
  *
  * ```ts
  * import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
@@ -117,6 +120,7 @@ export type CachePoint = typeof CachePointBlock.Encoded
  * }).annotate(AmazonBedrockLanguageModel.ToolCachePoint, { type: "default" })
  * ```
  *
+ * @stability unstable
  * @category services
  * @since 4.0.0
  */
@@ -147,6 +151,7 @@ declare module "effect/ai/Prompt" {
   /**
    * Amazon Bedrock options for system messages.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -155,6 +160,7 @@ declare module "effect/ai/Prompt" {
   /**
    * Amazon Bedrock options for user messages.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -163,6 +169,7 @@ declare module "effect/ai/Prompt" {
   /**
    * Amazon Bedrock options for assistant messages.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -171,6 +178,7 @@ declare module "effect/ai/Prompt" {
   /**
    * Amazon Bedrock options for tool messages.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -179,6 +187,7 @@ declare module "effect/ai/Prompt" {
   /**
    * Amazon Bedrock options for text prompt parts.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -187,6 +196,7 @@ declare module "effect/ai/Prompt" {
   /**
    * Amazon Bedrock options for tool call prompt parts.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -195,6 +205,7 @@ declare module "effect/ai/Prompt" {
   /**
    * Amazon Bedrock options for tool result prompt parts.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -228,6 +239,7 @@ const pushCachePoint = (
 /**
  * Requests that a document be citable.
  *
+ * @stability unstable
  * @category models
  * @since 4.0.0
  */
@@ -268,6 +280,7 @@ declare module "effect/ai/Prompt" {
   /**
    * Amazon Bedrock options for file prompt parts.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -283,6 +296,7 @@ declare module "effect/ai/Response" {
    * `location` names the unit `start` and `end` are counted in, and
    * `citedText` is the source text Converse reported for the cited span.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -386,6 +400,7 @@ const citationSource: (
  * back unmodified for the block to be accepted in a later turn, so it is
  * carried on the part's provider metadata rather than reconstructed.
  *
+ * @stability unstable
  * @category models
  * @since 4.0.0
  */
@@ -415,6 +430,7 @@ declare module "effect/ai/Prompt" {
    * later turn. A reasoning part without these options is dropped rather than
    * sent, since Bedrock rejects a reasoning block it cannot verify.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -429,6 +445,7 @@ declare module "effect/ai/Response" {
   /**
    * Amazon Bedrock metadata attached to completed reasoning parts.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -447,6 +464,7 @@ declare module "effect/ai/Response" {
    * after the reasoning text, so it arrives as metadata on a delta with no
    * text of its own.
    *
+   * @stability unstable
    * @category models
    * @since 4.0.0
    */
@@ -486,7 +504,7 @@ const reasoningTextInfo = (signature: string | undefined): ReasoningInfo => ({
  * thinking budget is drawn from the same ceiling as the visible answer, so
  * `inferenceConfig.maxTokens` must exceed `budget_tokens`.
  *
- * **Example**
+ * **Example** (Enabling extended thinking for one request)
  *
  * ```ts
  * import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
@@ -504,6 +522,7 @@ const reasoningTextInfo = (signature: string | undefined): ReasoningInfo => ({
  * )
  * ```
  *
+ * @stability unstable
  * @category configuration
  * @since 4.0.0
  */
@@ -553,6 +572,7 @@ export class Config extends Context.Service<
  * Creates an Amazon Bedrock model descriptor that can be provided with
  * `Effect.provide`.
  *
+ * @stability unstable
  * @category constructors
  * @since 4.0.0
  */
@@ -566,6 +586,7 @@ export const model = (
  * Creates an Amazon Bedrock `LanguageModel` service from a model identifier and
  * optional request defaults.
  *
+ * @stability unstable
  * @category constructors
  * @since 4.0.0
  */
@@ -673,6 +694,7 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
 /**
  * Creates a layer for the Amazon Bedrock language model.
  *
+ * @stability unstable
  * @category layers
  * @since 4.0.0
  */
@@ -685,6 +707,7 @@ export const layer = (options: {
 /**
  * Provides config overrides for Amazon Bedrock language model operations.
  *
+ * @stability unstable
  * @category configuration
  * @since 4.0.0
  */

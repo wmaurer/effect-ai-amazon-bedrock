@@ -10,6 +10,7 @@
  * but the content block and delta unions tolerate (and ignore) non-text members
  * so decoding never fails on them.
  *
+ * @stability unstable
  * @since 4.0.0
  */
 import * as Schema from "effect/Schema"
@@ -21,6 +22,7 @@ const makeIdentifier = (name: string) => `${prefix}/${name}`
 /**
  * A non-negative integer, used for token counts and content block indices.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -29,6 +31,7 @@ export const IntZeroOrGreater = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0
 /**
  * The reason the model stopped generating a response.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -47,6 +50,7 @@ export const StopReason = Schema.Literals([
 /**
  * The type of {@link StopReason}.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -55,6 +59,7 @@ export type StopReason = typeof StopReason.Type
 /**
  * Token usage statistics returned by the Converse API.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -73,6 +78,7 @@ export class TokenUsage extends Schema.Class<TokenUsage>(makeIdentifier("TokenUs
 /**
  * A tool-use content block: the model's request to invoke a tool.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -86,6 +92,7 @@ export class ToolUseBlock extends Schema.Class<ToolUseBlock>(makeIdentifier("Too
  * A tool-result content block: the outcome of a tool invocation fed back to the
  * model. Content is text-only in this provider.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -103,6 +110,7 @@ export class ToolResultBlock extends Schema.Class<ToolResultBlock>(makeIdentifie
  * `signature` must be echoed back unmodified alongside the text when the block
  * is sent in a later turn, or Bedrock rejects the request.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -121,6 +129,7 @@ export class ReasoningTextBlock extends Schema.Class<ReasoningTextBlock>(makeIde
  * Smithy blob, which the JSON protocol carries as a base64 string; it is kept
  * as that string so it round-trips untouched.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -144,6 +153,7 @@ export const ReasoningContentBlock = Schema.Struct({
  * `Schema.Json`, and `Json` admits a missing key but not an explicit
  * `undefined`.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -155,6 +165,7 @@ export class CachePointBlock extends Schema.Class<CachePointBlock>(makeIdentifie
 /**
  * The location of an object in an Amazon S3 bucket.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -172,6 +183,7 @@ export class S3Location extends Schema.Class<S3Location>(makeIdentifier("S3Locat
  * optional here. `bytes` is a Smithy blob, which the JSON protocol carries as a
  * base64 string.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -191,6 +203,7 @@ export const MediaSource = Schema.Struct({
  * about a quarter smaller on the wire. The union's fourth member, `content`,
  * is not modelled.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -202,6 +215,7 @@ export const DocumentSource = Schema.Struct({
 /**
  * An image content block.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -218,6 +232,7 @@ export class ImageBlock extends Schema.Class<ImageBlock>(makeIdentifier("ImageBl
  * When enabled the model may ground its answer in the document and return
  * `citationsContent` blocks pointing back at the spans it used.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -238,6 +253,7 @@ export class CitationsConfig extends Schema.Class<CitationsConfig>(makeIdentifie
  * length nor in alphabet and does not tie it to `citations`, so it is sent
  * whenever it is set.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -259,6 +275,7 @@ export class DocumentBlock extends Schema.Class<DocumentBlock>(makeIdentifier("D
  * `CitationLocation` member says which unit `start` and `end` are counted in.
  * `documentIndex` indexes the documents sent in the request, in order.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -277,6 +294,7 @@ export class DocumentLocation extends Schema.Class<DocumentLocation>(makeIdentif
  * the document members are modelled; `web` and `searchResultLocation` accompany
  * search results, which this provider cannot send, and decode as undefined.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -295,6 +313,7 @@ export const CitationLocation = Schema.Struct({
  * `CitationSourceContent` (the source text it was drawn from) and
  * `CitationSourceContentDelta`, which are all a single optional `text` member.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -305,6 +324,7 @@ export const CitationTextContent = Schema.Struct({
 /**
  * A reference from generated content back to a source document.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -323,6 +343,7 @@ export class Citation extends Schema.Class<Citation>(makeIdentifier("Citation"))
  * Returned in place of a plain `text` block once any document in the request
  * has citations enabled, so `content` carries the answer text itself.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -344,6 +365,7 @@ export class CitationsContentBlock extends Schema.Class<CitationsContentBlock>(
  * `{ type: "text" }` with no `text`) instead of failing the whole response;
  * the language model ignores such blocks.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -362,6 +384,7 @@ export const ContentBlock = Schema.Struct({
 /**
  * A message within a Converse conversation.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -378,6 +401,7 @@ export class Message extends Schema.Class<Message>(makeIdentifier("Message"))({
  * AWS models `SystemContentBlock` as a UNION, so both members are optional; a
  * block carries either the system text or a cache point.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -389,6 +413,7 @@ export const SystemContentBlock = Schema.Struct({
 /**
  * Base inference parameters to pass to a model in a Converse call.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -404,6 +429,7 @@ export class InferenceConfiguration extends Schema.Class<InferenceConfiguration>
 /**
  * The JSON Schema specification of a tool the model may call.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -428,6 +454,7 @@ export class ToolSpecification extends Schema.Class<ToolSpecification>(makeIdent
  * The union's third member, `systemTool`, selects a Bedrock-hosted tool this
  * provider cannot invoke, and is not modelled.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -440,6 +467,7 @@ export class Tool extends Schema.Class<Tool>(makeIdentifier("Tool"))({
  * Controls how the model selects a tool: let it decide (`auto`), force any tool
  * (`any`), or force a specific tool (`tool`).
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -452,6 +480,7 @@ export const ToolChoice = Schema.Union([
 /**
  * The type of {@link ToolChoice}.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -460,6 +489,7 @@ export type ToolChoice = typeof ToolChoice.Type
 /**
  * The tool configuration for a Converse request.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -471,9 +501,12 @@ export class ToolConfiguration extends Schema.Class<ToolConfiguration>(makeIdent
 /**
  * A JSON Schema the model's output must conform to.
  *
+ * **Details**
+ *
  * `schema` is the JSON Schema serialized to a string: Converse models it as a
  * `String`, not a document, and rejects an object here.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -487,6 +520,7 @@ export const JsonSchemaDefinition = Schema.Struct({
  * The structure the model's output must adhere to. A union on the wire whose
  * only member today is `jsonSchema`.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -497,6 +531,7 @@ export const OutputFormatStructure = Schema.Struct({
 /**
  * Structured output parameters for a Converse request.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -510,6 +545,7 @@ export const OutputFormat = Schema.Struct({
  * (`textFormat`) and the model's effort level (`effort`, one of `low`,
  * `medium`, `high`, `xhigh` or `max` on the models that accept it).
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -521,6 +557,8 @@ export const OutputConfig = Schema.Struct({
 /**
  * The request payload for the Converse and ConverseStream operations.
  *
+ * **Details**
+ *
  * `additionalModelRequestFields` carries inference parameters that are specific
  * to the target model, beyond the base set Converse exposes through
  * `inferenceConfig`. AWS models it as a free-form document, and it is kept
@@ -528,8 +566,9 @@ export const OutputConfig = Schema.Struct({
  * thinking on an Anthropic model is enabled through it, and the thinking budget
  * is drawn from the same ceiling as the visible answer, so
  * `inferenceConfig.maxTokens` must exceed it. See
- * {@link AmazonBedrockLanguageModel.Config} for a worked example.
+ * `AmazonBedrockLanguageModel.Config` for a worked example.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -550,6 +589,7 @@ export class ConverseRequest extends Schema.Class<ConverseRequest>(makeIdentifie
 /**
  * The output containing the message generated by the model.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -560,6 +600,7 @@ export class ConverseOutput extends Schema.Class<ConverseOutput>(makeIdentifier(
 /**
  * Metrics about a Converse call.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -570,6 +611,7 @@ export class ConverseMetrics extends Schema.Class<ConverseMetrics>(makeIdentifie
 /**
  * The response from a successful Converse call.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -587,6 +629,7 @@ export class ConverseResponse extends Schema.Class<ConverseResponse>(makeIdentif
 /**
  * The start of a streamed message.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -601,6 +644,7 @@ export class MessageStartEvent extends Schema.Class<MessageStartEvent>(
  * arguments as a partial JSON string that the consumer accumulates across
  * deltas and parses once the block stops.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -617,6 +661,7 @@ export const ToolUseBlockDelta = Schema.Struct({
  * and `redactedContent`, so every member is optional. The signature arrives in
  * its own delta after the text deltas, once the model has finished reasoning.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -634,6 +679,7 @@ export const ReasoningContentBlockDelta = Schema.Struct({
  * `CitationsDelta` repeats the fields of `Citation`; Converse sends one whole
  * citation per delta rather than splitting a single citation across several.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -655,6 +701,7 @@ export class CitationsDelta extends Schema.Class<CitationsDelta>(makeIdentifier(
  * does not fail the union decode and truncate the stream; the language model
  * skips such deltas.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -668,6 +715,7 @@ export const ContentBlockDelta = Schema.Struct({
 /**
  * A streamed delta event for a content block.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -681,6 +729,7 @@ export class ContentBlockDeltaEvent extends Schema.Class<ContentBlockDeltaEvent>
 /**
  * A streamed stop event for a content block.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -694,6 +743,7 @@ export class ContentBlockStopEvent extends Schema.Class<ContentBlockStopEvent>(
  * The tool-use member of a streaming content-block start. Carries the call id
  * and tool name; the arguments arrive as `toolUse` deltas.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -711,6 +761,7 @@ export const ToolUseBlockStart = Schema.Struct({
  * Members this provider does not model decode with their keys undefined rather
  * than failing the union decode and truncating the stream.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -724,6 +775,7 @@ export const ContentBlockStart = Schema.Struct({
  * typically start directly with deltas). The union must accept it or the whole
  * stream fails to decode.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -737,6 +789,7 @@ export class ContentBlockStartEvent extends Schema.Class<ContentBlockStartEvent>
 /**
  * The stop event for a streamed message.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -749,6 +802,7 @@ export class MessageStopEvent extends Schema.Class<MessageStopEvent>(
 /**
  * The trailing metadata event for a Converse stream, carrying usage and metrics.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -772,6 +826,7 @@ const ExceptionBody = Schema.Struct({
  * `{ messageStart: ... }`). A synthetic `type` discriminator is filled on decode
  * (and omitted on encode) so downstream code can branch on `event.type`.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */
@@ -825,6 +880,7 @@ export const ConverseResponseStreamEvent = Schema.Union([
 /**
  * The type of {@link ConverseResponseStreamEvent}.
  *
+ * @stability unstable
  * @category schemas
  * @since 4.0.0
  */

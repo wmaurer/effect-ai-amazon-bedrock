@@ -3,6 +3,7 @@
  * Amazon Bedrock AI provider integration. It is used to customize the
  * underlying HTTP client without changing individual request code.
  *
+ * @stability unstable
  * @since 4.0.0
  */
 import * as Context from "effect/Context"
@@ -14,6 +15,7 @@ import type { HttpClient } from "effect/http/HttpClient"
  * Service tag for Amazon Bedrock client configuration overrides, such as
  * transformations applied to the underlying HTTP client.
  *
+ * @stability unstable
  * @category services
  * @since 4.0.0
  */
@@ -35,6 +37,7 @@ export class AmazonBedrockConfig extends Context.Service<
 /**
  * Namespace containing types associated with the `AmazonBedrockConfig` service.
  *
+ * @stability unstable
  * @since 4.0.0
  */
 export declare namespace AmazonBedrockConfig {
@@ -53,6 +56,7 @@ export declare namespace AmazonBedrockConfig {
  * Runs an effect with an `AmazonBedrockConfig` override that transforms the
  * underlying `HttpClient` used by Amazon Bedrock requests.
  *
+ * @stability unstable
  * @category configuration
  * @since 4.0.0
  */

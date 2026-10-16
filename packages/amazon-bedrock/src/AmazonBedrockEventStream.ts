@@ -16,6 +16,7 @@
  * See the [AWS Documentation](https://docs.aws.amazon.com/lexv2/latest/dg/event-stream-encoding.html)
  * for more information.
  *
+ * @stability unstable
  * @since 4.0.0
  */
 import * as Arr from "effect/Array"
@@ -32,6 +33,7 @@ const textDecoder = new TextDecoder()
  * (`:message-type: error`). These frames have no JSON body; the error is
  * described by the `:error-code` and `:error-message` headers.
  *
+ * @stability unstable
  * @category errors
  * @since 4.0.0
  */
@@ -134,6 +136,7 @@ const decodeFrame = (frame: Uint8Array): DecodedFrame => {
  * Builds a channel that decodes AWS event-stream frames into values of the
  * provided schema.
  *
+ * @stability unstable
  * @category constructors
  * @since 4.0.0
  */

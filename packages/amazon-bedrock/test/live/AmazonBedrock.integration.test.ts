@@ -23,7 +23,7 @@ describe.skipIf(liveDisabled)("Amazon Bedrock (live)", { concurrent: false }, ()
   // Run against the default model and against Opus 5.5, which rejects the forced
   // `toolChoice` the provider used to send for structured output.
   it.effect.each([...new Set([MODEL, OPUS_5_5])])(
-    "generateObject decodes native structured output (%s)",
+    "generateObject decodes a structured object (%s)",
     (model) =>
       Effect.gen(function*() {
         const Finding = Schema.Struct({

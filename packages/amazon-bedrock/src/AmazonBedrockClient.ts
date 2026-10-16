@@ -12,6 +12,7 @@
  * service exposes handwritten helpers for the `converse` (non-streaming) and
  * `converse-stream` (streaming) endpoints.
  *
+ * @stability unstable
  * @since 4.0.0
  */
 import { AwsV4Signer } from "aws4fetch"
@@ -44,6 +45,7 @@ import * as Errors from "./internal/errors.ts"
  * Represents the Amazon Bedrock client service with methods for the Converse
  * API, including regular and streaming message creation.
  *
+ * @stability unstable
  * @category models
  * @since 4.0.0
  */
@@ -72,6 +74,7 @@ export interface Service {
 /**
  * Service tag for the Amazon Bedrock client.
  *
+ * @stability unstable
  * @category services
  * @since 4.0.0
  */
@@ -86,6 +89,7 @@ export class AmazonBedrockClient extends Context.Service<AmazonBedrockClient, Se
 /**
  * Configuration for creating an Amazon Bedrock client.
  *
+ * @stability unstable
  * @category options
  * @since 4.0.0
  */
@@ -120,6 +124,7 @@ const RedactedAmazonBedrockHeaders = {
 /**
  * Creates an Amazon Bedrock client service with the given options.
  *
+ * @stability unstable
  * @category constructors
  * @since 4.0.0
  */
@@ -214,6 +219,7 @@ export const make = Effect.fnUntraced(
 /**
  * Creates a layer for the Amazon Bedrock client with the given options.
  *
+ * @stability unstable
  * @category layers
  * @since 4.0.0
  */
@@ -224,6 +230,7 @@ export const layer = (options: Options): Layer.Layer<AmazonBedrockClient, never,
  * Creates a layer for the Amazon Bedrock client, loading credentials and other
  * settings via Effect's `Config` module.
  *
+ * @stability unstable
  * @category layers
  * @since 4.0.0
  */

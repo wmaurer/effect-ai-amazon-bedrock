@@ -134,11 +134,15 @@ place because a wrong mapping costs more than an unused one.
 **Still open.** The remaining six stop reasons stay mapped from the Smithy model alone. `stop_sequence`
 is provokable and shares its target (`stop`) with `end_turn`; `content_filtered` and
 `guardrail_intervened` need a configured guardrail; the two `malformed_*` reasons need a
-model that misbehaves on demand. `generateObject` runs live on both of its paths: native
-`outputConfig.textFormat` on Sonnet 4.5, and an unforced `{ auto: {} }` object tool on Opus 5.5,
-which on Bedrock rejects `outputConfig.textFormat`, `strict` tools and a forced `toolChoice`
-alike. The forced `{ tool: { name } }` path (pre-4.5 Claude models) and `{ any: {} }` are
-stub-only. Image and document `s3Location` sources are untested — they
+model that misbehaves on demand. `generateObject` sends one of three request shapes, and two of
+them run live: native `outputConfig.textFormat` on Sonnet 4.5, and an unforced `{ auto: {} }`
+object tool on Opus 5.5, which on Bedrock rejects `outputConfig.textFormat`, `strict` tools and a
+forced `toolChoice` alike. The third, a forced `{ tool: { name } }` object tool, is stub-only.
+The provider sends it to the models that `getModelCapabilities` lists as lacking native
+structured output but accepting a forced `toolChoice`, which are the Claude 3 models and Claude
+Sonnet 4 and Opus 4 but not Opus 4.1. It also sends it to any model that accepts a forced
+`toolChoice` when `structuredOutputs` is `false`. The `{ any: {} }`
+tool choice is stub-only too. Image and document `s3Location` sources are untested — they
 need a bucket and objects to point at. The 429 -> `RateLimitError` mapping has been seen
 in practice (it is why `--no-file-parallelism` exists) but is asserted nowhere, since
 provoking it means deliberately exceeding the account's token quota.
