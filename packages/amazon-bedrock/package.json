@@ -3,25 +3,34 @@
   "version": "4.0.1",
   "type": "module",
   "license": "MIT",
-  "description": "An Amazon Bedrock provider integration for Effect AI SDK",
-  "homepage": "https://effect.website",
+  "author": "Wayne Maurer",
+  "description": "An Amazon Bedrock provider for the Effect AI modules",
+  "homepage": "https://github.com/wmaurer/effect-ai-amazon-bedrock/tree/main/packages/amazon-bedrock#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Effect-TS/effect.git",
-    "directory": "packages/ai/amazon-bedrock"
+    "url": "https://github.com/wmaurer/effect-ai-amazon-bedrock.git",
+    "directory": "packages/amazon-bedrock"
   },
   "bugs": {
-    "url": "https://github.com/Effect-TS/effect/issues"
+    "url": "https://github.com/wmaurer/effect-ai-amazon-bedrock/issues"
   },
   "tags": [
     "typescript",
+    "effect",
     "ai",
-    "amazon-bedrock"
+    "llm",
+    "aws",
+    "amazon-bedrock",
+    "bedrock"
   ],
   "keywords": [
     "typescript",
+    "effect",
     "ai",
-    "amazon-bedrock"
+    "llm",
+    "aws",
+    "amazon-bedrock",
+    "bedrock"
   ],
   "sideEffects": [],
   "exports": {
