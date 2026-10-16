@@ -23,7 +23,7 @@ mkdir -p "$logs"
 summary="$logs/upstream-summary.log"
 : >"$summary"
 fork=${FORK_REPO:?set FORK_REPO to a git checkout of effect-ts/effect}
-ref=${FORK_REF:-848ad5935e}
+ref=${FORK_REF:-56c259e20d}
 wt="$logs/fork-wt"
 pkg=packages/ai/amazon-bedrock
 
@@ -59,6 +59,33 @@ vitest_ci() {
     case $v in AWS_*) unset "$v" ;; esac
   done
   EFFECT_INTEGRATION_TESTS=1 pnpm exec vitest run --project @effect/ai-amazon-bedrock --max-concurrency=10
+}
+
+# The fork's tsconfig.base.json keeps Effect diagnostics out of tsc's exit code, so any diagnostic line fails the step.
+tsc_clean() {
+  local out code
+  out=$("$@" 2>&1)
+  code=$?
+  echo "$out"
+  [ "$code" = 0 ] && ! echo "$out" | grep -qE '(error|warning|message) TS[0-9]+|effect\([A-Za-z]+\)'
+}
+
+# The fork's jsdocs check reads the whole fork, and the fork branch itself has findings outside the
+# package. A nonzero exit passes only when the output is a completed report whose findings are all
+# outside the package.
+jsdocs() {
+  local out code
+  out=$(pnpm exec effect-jsdocs --check 2>&1)
+  code=$?
+  echo "$out"
+  local lines=$(echo "$out" | grep -cv '^$')
+  local reports=$(echo "$out" | grep -cE '^(Wrote|Skipped) \.data/jsdocs\.json$')
+  local findings=$(echo "$out" | grep -cE '^packages/[^:]+\.ts: .')
+  local own=$(echo "$out" | grep -cE "^$pkg/[^:]+\.ts: .")
+  echo "jsdocs: $((findings - own)) findings outside $pkg, from the fork branch itself, are informational" >>"$summary"
+  [ "$own" = 0 ] || return 1
+  [ "$code" = 0 ] && return 0
+  [ "$code" -lt 128 ] && [ "$reports" = 1 ] && [ "$findings" -gt 0 ] && [ $((reports + findings)) = "$lines" ]
 }
 
 if [ -e "$wt" ]; then
@@ -99,8 +126,9 @@ step src-diff git diff --stat --exit-code "$ref" -- "$pkg/src" || echo "src-diff
 step test-diff git diff --stat --exit-code "$ref" -- "$pkg/test" || echo "test-diff is informational" >>"$summary"
 step oxlint pnpm exec oxlint -f unix "$pkg" || fail=1
 step dprint pnpm exec dprint check "$pkg/**/*.ts" || fail=1
-step tsc-src pnpm exec tsc -b "$pkg/tsconfig.json" || fail=1
-step tsc-test pnpm exec tsc -p tsconfig.bedrock-tests.json --noEmit || fail=1
+step tsc-src tsc_clean pnpm exec tsc -b "$pkg/tsconfig.json" || fail=1
+step tsc-test tsc_clean pnpm exec tsc -p tsconfig.bedrock-tests.json --noEmit || fail=1
+step jsdocs jsdocs || fail=1
 step vitest pnpm exec vitest run --project @effect/ai-amazon-bedrock || fail=1
 step vitest-ci vitest_ci || fail=1
 step doctest pnpm exec vitest run --config vitest.docs.ts "$pkg/src" || fail=1
