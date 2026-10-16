@@ -1,4 +1,4 @@
-# TODO — `@effect/ai-amazon-bedrock`
+# TODO — `@wmaurer/effect-ai-amazon-bedrock`
 
 Extensions deliberately scoped out while implementing streaming tool calls, reasoning,
 images/documents, prompt caching, and citations. None of these are bugs; each is a Converse
@@ -53,7 +53,7 @@ this provider cannot invoke.
 ## Verification gaps
 
 Every test in this package stubs the `HttpClient`, so nothing here is evidence about AWS
-itself. `packages/ai/amazon-bedrock/test/live/` holds checks that talk to real Bedrock; see
+itself. `packages/amazon-bedrock/test/live/` holds checks that talk to real Bedrock; see
 its README for how to run them and why they cannot fire by accident. **That directory is
 temporary and comes out before the branch is squashed for the upstream PR.**
 

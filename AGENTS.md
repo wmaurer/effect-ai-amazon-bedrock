@@ -8,7 +8,7 @@ Instructions for coding agents working in this repository.
 
 `@wmaurer/effect-ai-amazon-bedrock` is an Amazon Bedrock provider for Effect AI. `AmazonBedrockLanguageModel` talks to the Bedrock Runtime Converse and ConverseStream APIs. `AmazonBedrockClient` signs each request with SigV4 through `aws4fetch`, and `AmazonBedrockEventStream` decodes the `vnd.amazon.eventstream` frames of a streamed response. `AmazonBedrockSchema` holds the Converse wire shapes.
 
-The package started as `packages/ai/amazon-bedrock` in a fork of `effect-ts/effect` and may go back there as a pull request. For that reason it follows Effect's own lint, format, and tsconfig rules, and its tests keep importing `@effect/ai-amazon-bedrock`, the name the package has in the fork. `tsconfig.tests.json` maps that name to `packages/amazon-bedrock/src`.
+The package started as `packages/ai/amazon-bedrock` in a fork of `effect-ts/effect` and may go back there as a pull request. For that reason it follows Effect's own lint, format, and tsconfig rules. Its imports, JSDoc examples, service keys, and schema identifiers use `@wmaurer/effect-ai-amazon-bedrock`, and `tsconfig.tests.json` maps that name to `packages/amazon-bedrock/src`. `scripts/upstream-check.sh` reverses the rename to the fork's package name with one `sed`, then runs `dprint fmt` to restore the import order.
 
 `effect` is a peer dependency (`^4.0.5`) and a dev dependency pinned to the version the tests run on. The `overrides` entry in `pnpm-workspace.yaml` pins the same version for the whole workspace. To upgrade Effect, bump the `effect` dev pin in `packages/amazon-bedrock/package.json`, the `@effect/vitest` dev pin in the root `package.json`, and the override together.
 
