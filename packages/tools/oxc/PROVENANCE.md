@@ -6,7 +6,7 @@ Upstream [Effect-TS/effect](https://github.com/Effect-TS/effect) does not have t
 
 The copy holds four paths: `package.json`, `oxlintrc.json`, `tsconfig.json`, and `src/`. Each is byte-identical to the fork's file. Nobody has edited them. The fork's `test/` directory is not copied. `LICENSE` is a byte copy of the fork's root `LICENSE`, Effect's MIT license, which covers this code.
 
-The root `tsconfig.base.json` and `vitest.setup.ts` are byte copies from the same commit, under the same license.
+The root `tsconfig.base.json` and `vitest.setup.ts` are byte copies from the same commit, under the same license. `scripts/repos.js` is also a byte copy of the fork's file, but it is not Effect code. It is the generated bundle of the `repos` feature of `github.com/wmaurer/project-setup`, identical to `assets/scripts/repos.js` at project-setup commit `4a4a594`, and fork commit `d10285af60` added it to the fork. The `copies` step of `scripts/upstream-check.sh` compares every copy with the fork at the commit that `FORK_REF` names.
 
 ## Refresh the copy
 
@@ -18,7 +18,8 @@ rm -rf packages/tools/oxc/src
 cp -r "$fork"/packages/tools/oxc/{package.json,oxlintrc.json,tsconfig.json,src} packages/tools/oxc/
 cp "$fork"/LICENSE packages/tools/oxc/
 cp "$fork"/tsconfig.base.json "$fork"/vitest.setup.ts .
+cp "$fork"/scripts/repos.js scripts/
 pnpm install
 ```
 
-Then replace the fork commit in this file. Check the upstream paragraph again with `cmp`, or delete it. Run `pnpm lint`, `pnpm check`, and `pnpm test`.
+Then replace the fork commit in this file and the `FORK_REF` default in `scripts/upstream-check.sh`. Check the upstream paragraph again with `cmp`, or delete it. Compare the `@oxlint/plugins` override in `pnpm-workspace.yaml` and the tool versions in the root `package.json` with the new commit's lockfile. Run `pnpm lint`, `pnpm check`, `pnpm test`, and `scripts/upstream-check.sh`.

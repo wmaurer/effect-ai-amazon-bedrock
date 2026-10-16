@@ -7,7 +7,10 @@
     "check": "tsc -b tsconfig.json",
     "lint": "oxlint -f unix && dprint check",
     "lint-fix": "oxlint --fix && dprint fmt",
-    "test": "vitest"
+    "test": "vitest",
+    "deps:fetch": "node scripts/repos.js deps fetch",
+    "deps:check": "node scripts/repos.js deps check",
+    "refs:fetch": "node scripts/repos.js refs fetch"
   },
   "devDependencies": {
     "@babel/cli": "8.0.6",
