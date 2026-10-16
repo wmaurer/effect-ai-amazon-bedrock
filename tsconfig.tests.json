@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.base.json",
+  "references": [{ "path": "tsconfig.packages.json" }],
+  "include": [
+    "**/vitest.*.ts",
+    "./packages/**/test/**/*.ts"
+  ],
+  "exclude": ["**/node_modules/**", "**/dist/**"],
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "erasableSyntaxOnly": false,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "paths": {
+      "@effect/ai-amazon-bedrock": ["./packages/amazon-bedrock/src/index.ts"],
+      "@effect/ai-amazon-bedrock/*": ["./packages/amazon-bedrock/src/*.ts"]
+    },
+    "plugins": [{
+      "name": "@effect/language-service",
+      "namespaceImportPackages": [],
+      "includeSuggestionsInTsc": false,
+      "ignoreEffectWarningsInTscExitCode": true,
+      "ignoreEffectErrorsInTscExitCode": true,
+      "diagnosticSeverity": {
+        "unknownInEffectCatch": "off",
+        "multipleEffectProvide": "off"
+      }
+    }]
+  }
+}

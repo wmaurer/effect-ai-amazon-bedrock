@@ -1,0 +1,25 @@
+{
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "scripts": {
+    "prepare": "effect-tsgo patch",
+    "check": "tsc -b tsconfig.json",
+    "lint": "oxlint -f unix && dprint check",
+    "lint-fix": "oxlint --fix && dprint fmt",
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "@babel/cli": "8.0.6",
+    "@babel/core": "8.0.6",
+    "@effect/oxc": "workspace:^",
+    "@effect/tsgo": "0.46.1",
+    "@effect/vitest": "4.0.5",
+    "@types/node": "^26.6.3",
+    "babel-plugin-annotate-pure-calls": "0.5.0",
+    "dprint": "0.57.4",
+    "oxlint": "1.85.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2"
+  }
+}

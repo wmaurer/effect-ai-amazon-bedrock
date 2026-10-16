@@ -1,0 +1,13 @@
+packages:
+  - packages/*
+  - packages/tools/*
+
+verifyDepsBeforeRun: error
+
+allowBuilds:
+  dprint: false
+  esbuild: false
+
+overrides:
+  "@oxlint/plugins": 1.85.0
+  effect: 4.0.5

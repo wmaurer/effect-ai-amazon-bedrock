@@ -1,5 +1,5 @@
 {
-  "name": "@effect/ai-amazon-bedrock",
+  "name": "@wmaurer/effect-ai-amazon-bedrock",
   "version": "4.0.1",
   "type": "module",
   "license": "MIT",
@@ -52,20 +52,17 @@
     }
   },
   "scripts": {
-    "codegen": "effect-utils codegen",
     "build": "tsc -b tsconfig.json && pnpm babel",
     "babel": "babel dist --plugins annotate-pure-calls --out-dir dist --source-maps",
-    "check": "tsc -b tsconfig.json",
-    "test": "vitest",
-    "coverage": "vitest --coverage"
+    "check": "tsc -b tsconfig.json"
   },
   "dependencies": {
     "aws4fetch": "^1.0.20"
   },
   "devDependencies": {
-    "effect": "workspace:^"
+    "effect": "4.0.5"
   },
   "peerDependencies": {
-    "effect": "workspace:^"
+    "effect": "^4.0.5"
   }
 }

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "extends": ["./packages/tools/oxc/oxlintrc.json"],
+  "ignorePatterns": [
+    "**/dist",
+    "**/docs",
+    "**/*.tsbuildinfo",
+    "**/CHANGELOG.md",
+    "scripts/repos.js",
+    "**/.*",
+    "!.agents",
+    "!.agents/**/*",
+    "!.changeset",
+    "!.changeset/**/*",
+    "!.envrc",
+    "!.github",
+    "!.github/**/*",
+    "!.gitignore",
+    "!.oxlintrc.json",
+    "!.vscode",
+    "!.vscode/**/*"
+  ],
+  "jsPlugins": ["@effect/oxc/oxlint"],
+  "overrides": [{
+    "files": ["**/{test,scripts}/**"],
+    "rules": {
+      "effect/no-bigint-literals": "off",
+      "eslint/no-console": "off",
+      "effect/no-import-from-barrel-package": "off"
+    }
+  }]
+}
