@@ -79,11 +79,17 @@ The other options are these:
 
 Give a Bedrock model ID or an inference profile ID as the first argument of `AmazonBedrockLanguageModel.model`, or as the `model` option of `AmazonBedrockLanguageModel.layer`. Some models accept only an inference profile ID. Claude Sonnet 4.5, for example, needs a profile ID such as `eu.anthropic.claude-sonnet-4-5-20250929-v1:0`. The model must be enabled for your account in the region of the client.
 
-To set request defaults, give them as the second argument of `model` or as the `config` option of `layer`. The defaults take three Converse request fields: `inferenceConfig`, `additionalModelRequestFields`, and `toolConfig`. `generateObject` replaces your `toolConfig` with one forced tool. Any other request with tools replaces it with a `toolConfig` built from those tools, unless `toolChoice` is `"none"`. With no tools, or with `toolChoice` set to `"none"`, the provider sends your `toolConfig` unchanged.
+To set request defaults, give them as the second argument of `model` or as the `config` option of `layer`. The defaults take these fields:
 
-To change the defaults for one request, wrap the effect in `AmazonBedrockLanguageModel.withConfigOverride`. It takes the same three fields and `modelId`. Set `modelId` to send that request to a different model. Each field you give replaces the whole default field.
+- `inferenceConfig`, `additionalModelRequestFields`, and `toolConfig`. The provider sends each one as the Converse request field of the same name.
+- `outputConfig`, which takes only `effort`. The provider sets `outputConfig.textFormat` itself. `effort` is `low`, `medium`, `high`, `xhigh`, or `max`, and a higher level lets the model reason longer before it answers. Bedrock caps it at `high` when extended thinking is off.
+- `structuredOutputs`, which chooses how `generateObject` asks for the object. The provider does not send it to Bedrock. [Get structured output](#get-structured-output) explains it.
 
-This example turns on extended thinking for Claude models for one request. The thinking budget comes out of `maxTokens`, so `maxTokens` must be greater than `budget_tokens`. When `answer` runs with `Sonnet`, the override replaces all of `inferenceConfig`, so the request sends `maxTokens: 4096` and no `temperature`.
+When `generateObject` asks for the object through a tool, that tool replaces your `toolConfig`. Any other request with tools replaces it with a `toolConfig` built from those tools, unless `toolChoice` is `"none"`. With no tools, or with `toolChoice` set to `"none"`, the provider sends your `toolConfig` unchanged.
+
+To change the defaults for one request, wrap the effect in `AmazonBedrockLanguageModel.withConfigOverride`. It takes the same fields and `modelId`. Set `modelId` to send that request to a different model. Each field you give replaces the whole default field.
+
+This example turns on extended thinking for one request on a Claude model that takes a thinking budget, such as Claude Sonnet 4.5. The thinking budget comes out of `maxTokens`, so `maxTokens` must be greater than `budget_tokens`. When `answer` runs with `Sonnet`, the override replaces all of `inferenceConfig`, so the request sends `maxTokens: 4096` and no `temperature`.
 
 ```ts
 import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
@@ -105,7 +111,36 @@ export const answer = LanguageModel.generateText({
 )
 ```
 
-`LanguageModel.generateText`, `LanguageModel.streamText`, and `LanguageModel.generateObject` all work with this provider. `generateObject` sends the schema as a tool and forces the model to call it. Converse also accepts a JSON schema in `outputConfig.textFormat`, but this provider does not send one. The provider converts the schema with the rules for Anthropic models.
+The live reasoning suite treats Claude Opus 4.7 and 4.8 and the Claude Opus, Sonnet, Fable, and Mythos 5.x models as rejecting `budget_tokens` with a 400, and sends them adaptive thinking instead. On these models `outputConfig.effort` sets how much they reason, and the reasoning text is empty unless `display` is `"summarized"`. When `BEDROCK_MODEL_ID` names one of them, the suite sends this form:
+
+```ts
+import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
+import { LanguageModel } from "effect/ai"
+
+export const adaptiveAnswer = LanguageModel.generateText({
+  prompt: "How many r's are in strawberry?"
+}).pipe(
+  AmazonBedrockLanguageModel.withConfigOverride({
+    additionalModelRequestFields: {
+      thinking: { type: "adaptive", display: "summarized" }
+    },
+    outputConfig: { effort: "high" },
+    inferenceConfig: { maxTokens: 4096 }
+  })
+)
+```
+
+## Get structured output
+
+`LanguageModel.generateText`, `LanguageModel.streamText`, and `LanguageModel.generateObject` all work with this provider. By default, `generateObject` sends the schema in the Converse `outputConfig.textFormat` field, and the tools you pass go with it. The provider converts the schema with the rules for Anthropic models.
+
+The provider keeps a list of models that get the schema as a tool instead: the Claude 3 models, Claude Sonnet 4 and Opus 4, and Claude Opus 5.5. The Claude 3, Sonnet 4, and Opus 4 entries come from Anthropic's table of models with structured output. Opus 5.5 is on the list because Bedrock rejected `outputConfig.textFormat` for it in a live run. The tool replaces the tools you pass, and the tool's input becomes the object. If the model answers in text instead of calling the tool, `effect/ai` decodes the text as the object.
+
+On the tool path the provider forces the model to call the tool. Claude Opus 5.5, Sonnet 5.5, Fable 5.1, and Mythos 5.1 reject a forced `toolChoice`, so for them the provider leaves the tool unforced and adds a system prompt line that tells the model to call it. Sonnet 5.5, Fable 5.1, and Mythos 5.1 take the tool path only when `structuredOutputs` is `false`.
+
+The provider matches the model ID against its lists. Set `structuredOutputs` to `true` to send `outputConfig.textFormat` to any model, or to `false` to send the tool. The flag does not choose between the forced and the unforced tool, which also comes from the model ID. A model ID that does not name the model, such as an application inference profile ARN for Opus 5.5, therefore gets `outputConfig.textFormat` or a forced tool, and Opus 5.5 rejects both. [`docs/TODO.md`](https://github.com/wmaurer/effect-ai-amazon-bedrock/blob/main/docs/TODO.md) tracks this gap.
+
+Every model that is not on the list gets `outputConfig.textFormat` by default. The AI SDK's Bedrock provider asks for native structured output only from an allowlist of Claude models, because it records that newer Claude models reject it on Bedrock. Its list leaves out Claude Haiku 4.5, Sonnet 4.6, Opus 4.7 and 4.8, and the 5.x models. This provider does not follow that list. On 2026-10-17 in `eu-west-1`, Bedrock accepted `outputConfig.textFormat` from this provider for `eu.anthropic.claude-opus-4-8` and `eu.anthropic.claude-sonnet-5`, in `generateObject` calls that also passed a toolkit with `toolChoice: "auto"`. Nobody has checked Claude Haiku 4.5, Sonnet 4.6, Opus 4.7, Sonnet 5.5, Fable 5.1, or Mythos 5.1 with this provider. If a request fails on one of them, try `structuredOutputs: false`, which is also unchecked on those models.
 
 ## Set Bedrock options on a prompt
 
@@ -187,7 +222,7 @@ Converse has features that this provider does not model yet:
 - The `audio`, `guardContent`, `searchResult`, `toolAddition`, and `toolRemoval` content blocks, which the provider decodes and ignores.
 - Citations with a `web` or `searchResultLocation` location, which the provider drops.
 - System tools, which run on Bedrock.
-- The Converse request fields `outputConfig`, `guardrailConfig`, `promptVariables`, `requestMetadata`, `performanceConfig`, and `serviceTier`. The request config has no key for them.
+- The Converse request fields `guardrailConfig`, `promptVariables`, `requestMetadata`, `performanceConfig`, and `serviceTier`. The request config has no key for them.
 
 `LanguageModel.streamText` always asks for text, so streamed structured output is not available. That limit is in `effect/ai`, not in this provider.
 
