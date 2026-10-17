@@ -145,6 +145,14 @@ The client takes explicit credentials. It does not read `~/.aws`, the AWS profil
 
 `sessionToken` is optional, but `layerConfig` fails with a `ConfigError` if a `Config` that you give it finds no value. For that reason the example above gives `AWS_SESSION_TOKEN` an empty default with `Config.withDefault`. The client sends no session token when the token is empty, so the same program runs with temporary and long-lived keys.
 
+The client reads the credentials once, when the layer is built, and uses them for every request. Where you get them depends on where the program runs:
+
+- On a machine where the AWS CLI signs in through a profile or IAM Identity Center, run `eval "$(aws configure export-credentials --format env)"` in the shell before you start the program. The command needs AWS CLI version 2. It prints the profile's access key ID, secret access key, and session token, if the profile has one, as `export` lines. Add `--profile <name>` to choose a profile.
+- AWS Lambda sets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` for the function's execution role, so the example above runs without changes.
+- On Amazon ECS, Amazon EKS, and Amazon EC2, the role's credentials are not in the environment. Get them yourself, for example with `fromNodeProviderChain()` from `@aws-sdk/credential-providers`, and pass them to `AmazonBedrockClient.layer`.
+
+The client does not refresh temporary credentials. When the session ends, every request fails with an `AuthenticationError` of kind `ExpiredKey`. Restart the program with new credentials.
+
 The other options are these:
 
 - `region` defaults to `us-east-1`.
