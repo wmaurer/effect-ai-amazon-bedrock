@@ -1,5 +1,18 @@
 # @wmaurer/effect-ai-amazon-bedrock
 
+## 0.2.0
+
+`AmazonBedrockClient.layer`, `layerConfig`, and `make` take one of three ways to authenticate: the fixed keys of 0.1.0, a `credentialProvider`, or a Bedrock `apiKey`. Options that mix two ways, or give none, do not compile. Every 0.1.0 call compiles and runs unchanged.
+
+- Add the `credentialProvider` option. It takes a function in the shape of the AWS SDK's credential providers, such as `fromNodeProviderChain()` from `@aws-sdk/credential-providers`, or an `Effect`. The package does not depend on the AWS SDK. The client runs the provider when a request needs credentials, runs it once for concurrent requests, and keeps the credentials until five minutes before their `expiration`, or for at least 10 seconds.
+- Keep the last credentials while the provider fails and they have not expired. Ask the provider again after 30 seconds, or when the last credentials expire if that is sooner.
+- Refresh credentials that Bedrock rejects. After an `AuthenticationError` of kind `ExpiredKey`, `InvalidKey`, or `MissingKey`, the next request gets new credentials, and a function provider gets `{ forceRefresh: true }`. The rejected request fails and is not sent again.
+- Fail a request with an `AuthenticationError` of kind `Unknown` when the promise of a function provider rejects, and of kind `MissingKey` when a provider returns an empty key.
+- An `Effect` provider fails with an `AiError`, which the request fails with unchanged, or with an `AiError` reason, which the client puts in an `AiError`. The services that it requires become requirements of the layer through a new type parameter. It runs with the services of the request first, and the services that the layer was built with fill in the rest, so a span that it opens is a child of the request's span.
+- Add the `apiKey` option for Bedrock API keys. The client sends the key as `Authorization: Bearer <key>` in place of a SigV4 signature, and an `AiError` shows the header as `<redacted>`.
+- Add the `Credentials`, `CredentialProvider`, and `ConfigOptions` types. `Options`, `ConfigOptions`, `CredentialProvider`, `make`, `layer`, and `layerConfig` take a type parameter `R` for the services of an `Effect` provider. It defaults to `never`.
+- A retry policy in `transformClient` or `AmazonBedrockConfig.withClientTransform` signs each attempt again with the credentials of the request, and does not retry a provider that fails.
+
 ## 0.1.0
 
 The first release. It adds an Amazon Bedrock provider for `effect/ai`. The provider calls the Converse and ConverseStream APIs, signs requests with SigV4 through `aws4fetch`, and decodes the AWS event-stream framing without another dependency. `AmazonBedrockClient.layer` and `AmazonBedrockClient.layerConfig` take an access key and a secret key, and the optional `sessionToken`, `region`, `apiUrl`, and `transformClient`. The region defaults to `us-east-1`. `AmazonBedrockLanguageModel.Config` takes the Converse request fields other than `messages` and `system`.
