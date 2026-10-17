@@ -110,7 +110,10 @@ EOF
 
 fail=0
 step copies copies || fail=1
-step install pnpm install --frozen-lockfile --offline || fail=1
+# pnpm keeps a store on each filesystem, so a log dir on another one, such as a tmpfs /tmp, would
+# install offline from a store that lacks the fork's packages.
+store=$(dirname "$(cd "$fork" && pnpm store path)")
+step install pnpm install --frozen-lockfile --offline --store-dir "$store" || fail=1
 step copy copy_package || fail=1
 
 renamed=$(cd "$wt" && grep -rl '@wmaurer/effect-ai-amazon-bedrock' "$pkg/src" "$pkg/test")
