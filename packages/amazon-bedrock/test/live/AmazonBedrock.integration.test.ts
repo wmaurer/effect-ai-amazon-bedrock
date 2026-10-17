@@ -20,11 +20,16 @@ describe.skipIf(liveDisabled)("Amazon Bedrock (live)", { concurrent: false }, ()
       assert.isAtLeast(response.usage.outputTokens.total ?? 0, 1)
     }).pipe(Effect.provide(modelLayer())), TIMEOUT)
 
-  // Run against the default model and against Opus 5.5, which rejects the forced
-  // `toolChoice` the provider used to send for structured output.
-  it.effect.each([...new Set([MODEL, OPUS_5_5])])(
-    "generateObject decodes a structured object (%s)",
-    (model) =>
+  // Run against the default model and Opus 5.5 on the path the provider detects,
+  // which is native structured output for both, and against Opus 5.5 on the
+  // object tool, which goes out unforced because Opus 5.5 rejects a forced
+  // `toolChoice`.
+  it.effect.each([
+    ...[...new Set([MODEL, OPUS_5_5])].map((model) => ({ model, path: "detected" })),
+    { model: OPUS_5_5, path: "object tool" }
+  ])(
+    "generateObject decodes a structured object ($model, $path)",
+    ({ model, path }) =>
       Effect.gen(function*() {
         const Finding = Schema.Struct({
           severity: Schema.Literals(["low", "medium", "high"]),
@@ -39,7 +44,10 @@ describe.skipIf(liveDisabled)("Amazon Bedrock (live)", { concurrent: false }, ()
         // returning an empty string that happens to satisfy Schema.String.
         assert.include(["low", "medium", "high"], response.value.severity)
         assert.isAtLeast(response.value.summary.length, 1)
-      }).pipe(Effect.provide(modelLayer(undefined, model))),
+      }).pipe(
+        AmazonBedrockLanguageModel.withConfigOverride(path === "object tool" ? { structuredOutputs: false } : {}),
+        Effect.provide(modelLayer(undefined, model))
+      ),
     TIMEOUT
   )
 

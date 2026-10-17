@@ -10,9 +10,9 @@
  * json_schema mode, where it can be combined with the caller's own tools. On
  * models without native support (detected from the model id, overridable with
  * `Config.structuredOutputs`) the object is asked for through a tool instead:
- * forced where the model accepts a forced `toolChoice`, and otherwise left
- * unforced with an instruction to call it, since Claude Opus 5.5 and later
- * reject forcing. Reasoning is surfaced on both paths, and reasoning blocks
+ * forced where the model accepts a forced `toolChoice` (overridable with
+ * `Config.forcedToolChoice`), and otherwise left unforced with an instruction
+ * to call it. Reasoning is surfaced on both paths, and reasoning blocks
  * round-trip into later turns when they carry the Bedrock signature. Image and
  * document file parts are converted into Converse `image` / `document` blocks;
  * a media type Converse does not accept fails loudly with
@@ -560,6 +560,24 @@ export class Config extends Context.Service<
        * models that do not. Never sent to Bedrock.
        */
       readonly structuredOutputs?: boolean | undefined
+      /**
+       * Whether the model accepts a forced `toolChoice` (`tool` or `any`).
+       *
+       * **Details**
+       *
+       * Overrides automatic capability detection based on the model
+       * identifier. It decides whether the tool that `generateObject` uses
+       * without native structured output is forced, so with
+       * `structuredOutputs: false` it selects between the forced and the
+       * unforced tool, for example for an application inference profile ARN,
+       * which does not name its model. Never sent to Bedrock.
+       *
+       * It steers only that tool. A `toolChoice` passed with the caller's own
+       * tools, such as `"required"` or a named tool, goes to Bedrock
+       * unchanged, and a model that rejects a forced `toolChoice` answers it
+       * with a 400.
+       */
+      readonly forcedToolChoice?: boolean | undefined
     }
   >
 >()("@wmaurer/effect-ai-amazon-bedrock/AmazonBedrockLanguageModel/Config") {}
@@ -605,7 +623,7 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
       readonly documents: ReadonlyArray<CitedDocument>
     }, AiError.AiError> {
       const services = yield* Effect.context<never>()
-      const { structuredOutputs, ...config } = {
+      const { forcedToolChoice, structuredOutputs, ...config } = {
         modelId: model,
         ...providerConfig,
         ...services.mapUnsafe.get(Config.key)
@@ -640,9 +658,9 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
           }
         } else {
           // The object is asked for through a tool, which replaces the
-          // caller's tools. Claude Opus 5.5 and later reject a forced
-          // `toolChoice` with a 400, so on those models the tool is left
-          // unforced and the request says to call it.
+          // caller's tools. A model that rejects a forced `toolChoice` gets
+          // the tool unforced, and the request says to call it.
+          const forced = forcedToolChoice ?? capabilities.supportsForcedToolChoice
           nameMapper = new Tool.NameMapper([])
           toolConfig = {
             tools: [{
@@ -652,11 +670,9 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
                 inputSchema: { json: json as Record<string, unknown> }
               }
             }],
-            toolChoice: capabilities.supportsForcedToolChoice
-              ? { tool: { name: responseFormat.objectName } }
-              : { auto: {} }
+            toolChoice: forced ? { tool: { name: responseFormat.objectName } } : { auto: {} }
           }
-          if (!capabilities.supportsForcedToolChoice) {
+          if (!forced) {
             system = [...(system ?? []), {
               text: `Respond only by calling the \`${responseFormat.objectName}\` tool. Do not answer in text.`
             }]
@@ -1083,13 +1099,19 @@ interface ModelCapabilities {
  * model ids and inference profile ids (`eu.anthropic.…`) both resolve.
  *
  * - Claude models before Opus 4.1 / Sonnet 4.5 predate structured output, as
- *   in the Anthropic provider.
- * - Claude Opus 5.5 supports structured output on the Anthropic API, but
- *   Bedrock rejects `outputConfig.textFormat` for it with `output_config.format:
- *   Extra inputs are not permitted` (seen live on 2026-10-06). Override with
- *   `Config.structuredOutputs` once Bedrock catches up.
- * - Claude Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 reject a forced
- *   `toolChoice` (`tool` or `any`) with a 400.
+ *   in the Anthropic provider. This is not checked on Bedrock: a probe of 17
+ *   Claude inference profiles in eu-west-1 on 2026-10-17 found Claude 3 Haiku,
+ *   Claude 3 Sonnet and Sonnet 4 at end of life there, and did not try Claude
+ *   3 Opus, 3.5 Haiku, 3.5 Sonnet, 3.7 Sonnet, Opus 4 or Opus 4.1.
+ * - Every Claude profile that served the probe's requests (12 of 17)
+ *   accepted `outputConfig.textFormat`: Haiku 4.5 and 5.5, Opus 4.5 to 4.8, 5
+ *   and 5.5, and Sonnet 4.5, 4.6, 5 and 5.5. Fable 5 and 5.1 rejected every
+ *   request, with or without `textFormat`, with a data-retention
+ *   `ValidationException`; the other three are at end of life.
+ * - Claude Opus 5.5 and Sonnet 5.5 rejected a forced `toolChoice` with
+ *   `type "tool" and "any" are not supported for this model` in the same
+ *   probe. Fable 5.1 and Mythos 5.1 are assumed to reject it as well,
+ *   unchecked on Bedrock.
  *
  * @see https://platform.claude.com/docs/en/build-with-claude/structured-outputs
  */
@@ -1101,7 +1123,6 @@ const getModelCapabilities = (modelId: string): ModelCapabilities => {
     modelId.includes("claude-mythos-5-1")
   )
   const supportsStructuredOutput = !(
-    modelId.includes("claude-opus-5-5") ||
     modelId.includes("claude-sonnet-4-0") ||
     modelId.includes("claude-sonnet-4-20250514") ||
     modelId.includes("claude-3-7-sonnet") ||
@@ -1227,8 +1248,12 @@ const makeResponse: (
       Predicate.isUndefined(request.outputConfig?.textFormat)
     ? options.responseFormat.objectName
     : undefined
-  const hasObjectTool = Predicate.isNotUndefined(objectToolName) &&
-    response.output.message.content.some((part) => part.toolUse?.name === objectToolName)
+  // A model can call the object tool more than once. The first call is the
+  // object: joining the inputs of several calls would not be valid JSON.
+  const objectToolPart = Predicate.isUndefined(objectToolName)
+    ? undefined
+    : response.output.message.content.find((part) => part.toolUse?.name === objectToolName)
+  const hasObjectTool = Predicate.isNotUndefined(objectToolPart)
 
   parts.push({
     type: "response-metadata",
@@ -1258,10 +1283,12 @@ const makeResponse: (
       if (part.toolUse.name === objectToolName) {
         // The object tool's input is the object: re-emit it as text for the
         // LanguageModel layer to decode.
-        parts.push({
-          type: "text",
-          text: JSON.stringify(part.toolUse.input)
-        })
+        if (part === objectToolPart) {
+          parts.push({
+            type: "text",
+            text: JSON.stringify(part.toolUse.input)
+          })
+        }
         continue
       }
       parts.push({

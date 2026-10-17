@@ -15,9 +15,8 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 export const MODEL = process.env.BEDROCK_MODEL_ID ?? "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
 /**
- * Claude Opus 5.5 via the EU geo inference profile. From this generation on, Anthropic models
- * reject a forced `toolChoice`, so it is the model that proves structured output does not
- * depend on one.
+ * Claude Opus 5.5 via the EU geo inference profile. It rejects a forced `toolChoice`, so it is
+ * the model that proves the object tool works unforced.
  */
 export const OPUS_5_5 = "eu.anthropic.claude-opus-5-5"
 

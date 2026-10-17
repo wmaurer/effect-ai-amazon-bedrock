@@ -1290,6 +1290,26 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(JSON.parse(textFormat.structure.jsonSchema.schema).type, "object")
       }))
 
+    it.effect("requests native structured output on Claude Opus 5.5", () =>
+      Effect.gen(function*() {
+        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+        const handler = (request: HttpClientRequest.HttpClientRequest) => {
+          captured = request
+          return Effect.succeed(objectResponse(request, [{ text: "{\"ok\":true}" }]))
+        }
+
+        const result = yield* LanguageModel.generateObject({
+          prompt: "x",
+          objectName: "result",
+          schema: Schema.Struct({ ok: Schema.Boolean })
+        }).pipe(Effect.provide(layersFor(handler, "eu.anthropic.claude-opus-5-5")))
+
+        assert.deepStrictEqual(result.value, { ok: true })
+        const body = yield* getRequestBody(captured!)
+        assert.isUndefined(body.toolConfig)
+        assert.strictEqual(body.outputConfig.textFormat.structure.jsonSchema.name, "result")
+      }))
+
     it.effect("renders union and nullable fields in the output schema", () =>
       Effect.gen(function*() {
         let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
@@ -1339,8 +1359,9 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(body.outputConfig.textFormat.type, "json_schema")
       }))
 
-    describe("on a model without native structured output", () => {
+    describe("through the object tool", () => {
       const Answer = Schema.Struct({ answer: Schema.Number })
+      const toolPath = AmazonBedrockLanguageModel.withConfigOverride({ structuredOutputs: false })
 
       it.effect("asks for an unforced tool when the model rejects a forced one", () =>
         Effect.gen(function*() {
@@ -1366,7 +1387,7 @@ describe("AmazonBedrockLanguageModel", () => {
             prompt: "2 + 2?",
             objectName: "Answer",
             schema: Answer
-          }).pipe(Effect.provide(layersFor(handler, "eu.anthropic.claude-opus-5-5")))
+          }).pipe(toolPath, Effect.provide(layersFor(handler, "eu.anthropic.claude-opus-5-5")))
 
           // The tool input is the object; the prose next to it is not concatenated in.
           assert.deepStrictEqual(result.value, { answer: 4 })
@@ -1390,7 +1411,7 @@ describe("AmazonBedrockLanguageModel", () => {
             prompt: "2 + 2?",
             objectName: "Answer",
             schema: Answer
-          }).pipe(Effect.provide(layersFor(handler, "eu.anthropic.claude-opus-5-5")))
+          }).pipe(toolPath, Effect.provide(layersFor(handler, "eu.anthropic.claude-opus-5-5")))
 
           assert.deepStrictEqual(result.value, { answer: 4 })
         }))
@@ -1416,6 +1437,23 @@ describe("AmazonBedrockLanguageModel", () => {
           assert.isUndefined(body.outputConfig)
           assert.deepStrictEqual(body.toolConfig.toolChoice, { tool: { name: "Answer" } })
         }))
+      it.effect("emits only the first object when the model calls the object tool twice", () =>
+        Effect.gen(function*() {
+          const handler = (request: HttpClientRequest.HttpClientRequest) =>
+            Effect.succeed(objectResponse(request, [
+              { toolUse: { toolUseId: "tu_1", name: "Answer", input: { answer: 4 } } },
+              { toolUse: { toolUseId: "tu_2", name: "Answer", input: { answer: 5 } } }
+            ]))
+
+          const result = yield* LanguageModel.generateObject({
+            prompt: "2 + 2?",
+            objectName: "Answer",
+            schema: Answer
+          }).pipe(Effect.provide(layersFor(handler, "us.anthropic.claude-3-7-sonnet-20250219-v1:0")))
+
+          assert.deepStrictEqual(result.value, { answer: 4 })
+          assert.strictEqual(result.text, "{\"answer\":4}")
+        }))
     })
 
     it.effect("lets structuredOutputs override the model detection, and keeps it off the wire", () =>
@@ -1440,7 +1478,7 @@ describe("AmazonBedrockLanguageModel", () => {
         // ... and on for one detected as not supporting it.
         yield* generate.pipe(
           AmazonBedrockLanguageModel.withConfigOverride({ structuredOutputs: true }),
-          Effect.provide(layersFor(handler, "eu.anthropic.claude-opus-5-5"))
+          Effect.provide(layersFor(handler, "us.anthropic.claude-3-7-sonnet-20250219-v1:0"))
         )
 
         assert.isUndefined(bodies[0].outputConfig)
@@ -1449,6 +1487,46 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(bodies[1].outputConfig.textFormat.type, "json_schema")
         for (const body of bodies) {
           assert.notProperty(body, "structuredOutputs")
+        }
+      }))
+
+    it.effect("lets forcedToolChoice override the model detection, and keeps it off the wire", () =>
+      Effect.gen(function*() {
+        const bodies: Array<any> = []
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.map(getRequestBody(request), (body) => {
+            bodies.push(body)
+            return objectResponse(request, [{ toolUse: { toolUseId: "tu_1", name: "result", input: { ok: true } } }])
+          })
+        const generate = LanguageModel.generateObject({
+          prompt: "x",
+          objectName: "result",
+          schema: Schema.Struct({ ok: Schema.Boolean })
+        })
+
+        // An application inference profile ARN does not name its model, so the
+        // detection cannot tell that the model rejects a forced tool ...
+        yield* generate.pipe(
+          AmazonBedrockLanguageModel.withConfigOverride({ structuredOutputs: false, forcedToolChoice: false }),
+          Effect.provide(layersFor(
+            handler,
+            "arn:aws:bedrock:eu-west-1:123456789012:application-inference-profile/a1b2c3d4e5f6"
+          ))
+        )
+        // ... and forcing can be turned back on for a model detected as rejecting it.
+        yield* generate.pipe(
+          AmazonBedrockLanguageModel.withConfigOverride({ structuredOutputs: false, forcedToolChoice: true }),
+          Effect.provide(layersFor(handler, "eu.anthropic.claude-opus-5-5"))
+        )
+
+        assert.deepStrictEqual(bodies[0].toolConfig.toolChoice, { auto: {} })
+        assert.deepStrictEqual(bodies[0].system, [{
+          text: "Respond only by calling the `result` tool. Do not answer in text."
+        }])
+        assert.deepStrictEqual(bodies[1].toolConfig.toolChoice, { tool: { name: "result" } })
+        assert.deepStrictEqual(bodies[1].system, [])
+        for (const body of bodies) {
+          assert.notProperty(body, "forcedToolChoice")
         }
       }))
 
