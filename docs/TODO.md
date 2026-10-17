@@ -22,6 +22,9 @@ optional session token (`AmazonBedrockClient.ts`). Nothing else supplies credent
   `credentialProvider` function (`packages/amazon-bedrock/src/amazon-bedrock-provider.ts` in
   `vercel/ai`). That is the prior art for both.
 
+The design and implementation plan for 0.2.0 are in
+`docs/design/2026-10-17-bedrock-credentials-design.md`.
+
 ## Models from other providers
 
 Every live call so far has gone to a Claude model. The live suites default to Claude Sonnet 4.5

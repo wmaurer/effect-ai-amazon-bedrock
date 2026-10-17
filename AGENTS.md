@@ -16,7 +16,7 @@ A `@since` tag names the version of this package that added the API, such as `0.
 
 `src/index.ts` comes from the `effect-utils codegen` command of the Effect monorepo, which this repository does not have. When you add a module, add an export block in the same form as the others, a JSDoc comment with `@stability unstable` and `@since`, and an `export * as` line. The new module's own JSDoc and each of its exports need a `@stability` tag too, because the fork's `tsc` and its JSDoc check require one. The `barrel` step of `scripts/upstream-check.sh` runs the codegen and fails if its output differs from the file.
 
-`docs/TODO.md` lists the Converse capabilities the provider does not model yet. Read it before you add one. `docs/design/` holds the design records for earlier features. They are copied verbatim from the Effect fork, so oxlint and dprint skip `docs/`.
+`docs/TODO.md` lists the Converse capabilities the provider does not model yet. Read it before you add one. `docs/design/` holds the design records for features. The records dated 2026-08 are copied verbatim from the Effect fork. Oxlint and dprint skip `docs/`. `docs/design/2026-10-17-bedrock-credentials-design.md` is the design and plan for 0.2.0, which is not implemented yet.
 
 ## Tooling
 
