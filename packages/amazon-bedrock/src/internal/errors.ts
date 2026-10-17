@@ -105,6 +105,11 @@ export const mapHttpClientError = dual<
   }
 })
 
+/** @internal */
+export const mapCredentialProviderError =
+  (method: string) => (error: AiError.AiError | AiError.AiErrorReason): AiError.AiError =>
+    AiError.isAiError(error) ? error : AiError.make({ module: "AmazonBedrockClient", method, reason: error })
+
 // Bedrock REST errors are FLAT `{ "message": "..." }` (AWS uses both casings),
 // with the exception type carried in the `x-amzn-errortype` header — NOT
 // Anthropic's nested `{ error: { type, message } }`. Schema-guarded so a
