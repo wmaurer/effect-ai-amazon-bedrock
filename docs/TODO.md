@@ -1,8 +1,71 @@
 # TODO — `@wmaurer/effect-ai-amazon-bedrock`
 
 Extensions deliberately scoped out while implementing streaming tool calls, reasoning,
-images/documents, prompt caching, and citations. None of these are bugs; each is a Converse
-capability the provider does not model yet. Ordered by how likely they are to matter.
+images/documents, prompt caching, and citations, and assumptions that no live run has checked.
+Ordered by how likely they are to matter.
+
+## Credentials
+
+`AmazonBedrockClient.layer` and `layerConfig` take one fixed access key id, secret access key, and
+optional session token (`AmazonBedrockClient.ts`). Nothing else supplies credentials:
+
+- There is no AWS credential chain. Shared config and credential files (`~/.aws`), profiles, IAM
+  Identity Center, ECS and EKS container credentials, and EC2 instance metadata are not read.
+  A service on ECS or EKS gets its role's credentials only from the container credentials
+  endpoint, so it cannot use this provider without code of its own that copies them into the
+  layer.
+- Temporary credentials are never refreshed. The layer reads them once, so a long-running
+  process fails with `ExpiredTokenException` when the session ends.
+- Bedrock API keys are not supported. They are sent as `Authorization: Bearer <key>` in place of
+  a SigV4 signature. The AI SDK's provider takes them through an `apiKey` option or the
+  `AWS_BEARER_TOKEN_BEDROCK` environment variable, and takes refreshable credentials through a
+  `credentialProvider` function (`packages/amazon-bedrock/src/amazon-bedrock-provider.ts` in
+  `vercel/ai`). That is the prior art for both.
+
+## Models from other providers
+
+Every live call so far has gone to a Claude model. The live suites default to Claude Sonnet 4.5
+and Opus 5.5, and the structured-output probe sent only Claude inference profiles. Nova, Llama,
+Mistral, DeepSeek, and the other providers on Bedrock are untested. `generateText`, `streamText`,
+and tool calls use the shape Converse shares across models, so they are the most likely to work.
+These parts of the provider assume a Claude model:
+
+- `getModelCapabilities` gives `outputConfig.textFormat` to every model ID it does not name, so
+  `generateObject` on another provider's model takes the native path by default. Whether Bedrock
+  accepts `outputConfig.textFormat` for those models is unchecked. If it does not, the default
+  `generateObject` fails with a 400 until the caller sets `structuredOutputs: false`.
+- On the tool path, `getModelCapabilities` treats every model it does not name as accepting a
+  forced `toolChoice`. The Smithy model documents `ToolChoice.tool` as "Only supported by
+  Anthropic Claude 3 and Amazon Nova models", so `structuredOutputs: false` likely fails on Llama,
+  Mistral, and the others. `forcedToolChoice: false` would avoid it.
+- Tool input schemas and the `outputConfig.textFormat` schema are converted with
+  `toCodecAnthropic` for every model.
+- Reasoning has been seen only from Claude, always with a `signature` or `redactedContent`.
+  Reasoning from DeepSeek R1 and similar models has no signature. The schema makes `signature`
+  optional, so it should decode, but no live run has shown it.
+
+The live suites cannot settle this as they stand. `BEDROCK_MODEL_ID` changes the model, but the
+cache, citation, and reasoning tests check Claude behaviour and would fail on other models for
+that reason alone. A probe with one `generateText`, one `streamText` with a tool call, and one
+`generateObject` per model would cover the list above.
+
+## Unknown stop reasons
+
+`StopReason` in `AmazonBedrockSchema.ts` is a closed set of the nine values in the Smithy model,
+and it decodes `ConverseResponse.stopReason` and `MessageStopEvent.stopReason`. If Bedrock adds
+a stop reason, or a model returns one outside the set, the whole response fails to decode,
+including the text that came before it. Decoding an unknown value as a string would keep the
+response. `resolveFinishReason` in `internal/utilities.ts` already gives `"unknown"` for a value
+missing from its map, though Effect's `"other"` (a reason the protocol does not support) fits an
+unrecognised stop reason better.
+
+## Embeddings
+
+`effect/ai` defines an `EmbeddingModel` interface, and this package implements only
+`LanguageModel`. The Bedrock embedding models, such as Titan Text Embeddings and Cohere Embed,
+are served by `InvokeModel` with a request body that differs for each model, not by Converse.
+Supporting them means a second request path in `AmazonBedrockClient` and one body codec for each
+model family.
 
 ## `additionalModelResponseFieldPaths`
 
