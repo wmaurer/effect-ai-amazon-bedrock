@@ -23,7 +23,7 @@ mkdir -p "$logs"
 summary="$logs/upstream-summary.log"
 : >"$summary"
 fork=${FORK_REPO:?set FORK_REPO to a git checkout of effect-ts/effect}
-ref=${FORK_REF:-56c259e20d}
+ref=${FORK_REF:-bbff465e30}
 wt="$logs/fork-wt"
 pkg=packages/ai/amazon-bedrock
 

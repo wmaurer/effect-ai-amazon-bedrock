@@ -29,8 +29,8 @@ section above covers `additionalModelResponseFieldPaths`. The other five are not
 `AmazonBedrockLanguageModel.Config` is the encoded `ConverseRequest` without `messages`, `system`,
 and `outputConfig`, with every field optional, so the request config has no key for these five.
 It adds its own `outputConfig`, which takes only `effort`, because the provider sets `textFormat`
-for `generateObject`. It also adds `structuredOutputs`, which picks how `generateObject` asks for
-the object and is never sent to Bedrock. `make` spreads the config into the request, so a field
+for `generateObject`. It also adds `structuredOutputs` and `forcedToolChoice`, which pick how `generateObject`
+asks for the object and are never sent to Bedrock. `make` spreads the config into the request, so a field
 added to `ConverseRequest` reaches Bedrock through `model`, `layer`, and `withConfigOverride` with
 no other change.
 
@@ -40,23 +40,28 @@ no other change.
 ## How `generateObject` chooses its path
 
 `getModelCapabilities` in `AmazonBedrockLanguageModel.ts` reads the model ID and decides between
-native `outputConfig.textFormat`, a forced object tool, and an unforced one. Three defects are
-open:
+native `outputConfig.textFormat`, a forced object tool, and an unforced one.
+`Config.structuredOutputs` and `Config.forcedToolChoice` override each decision, and a prompt
+that holds tool calls while no tools go out takes the object tool on every model. A probe on
+2026-10-17 sent one Converse request per path to 17 Claude inference profiles through the
+`eu-west-1` endpoint, and the rule follows what it saw. These parts of the rule it could not check:
 
-- It is a denylist, so every model ID it does not name gets `outputConfig.textFormat`. The AI
-  SDK's Bedrock provider (`packages/amazon-bedrock/src/amazon-bedrock-anthropic-model-support.ts`
-  in `vercel/ai`) asks for native structured output only from an allowlist of Claude models,
-  because it records that newer Claude models reject it on Bedrock. Its list leaves out Claude
-  Haiku 4.5, Sonnet 4.6, Opus 4.7 and 4.8, and the 5.x models. On 2026-10-17 in `eu-west-1`,
-  Bedrock accepted `outputConfig.textFormat` from this provider for
-  `eu.anthropic.claude-opus-4-8` and `eu.anthropic.claude-sonnet-5`, in `generateObject` calls
-  that also passed a toolkit with `toolChoice: "auto"`. Claude Haiku 4.5, Sonnet 4.6, Opus 4.7,
-  Sonnet 5.5, Fable 5.1, and Mythos 5.1 are unchecked.
-- No option selects the unforced object tool. With `structuredOutputs: false` the tool is forced
-  unless the model ID names Opus 5.5, Sonnet 5.5, Fable 5.1, or Mythos 5.1, so an application
-  inference profile ARN that wraps Opus 5.5 cannot run `generateObject` at all.
-- When a response calls the object tool twice, `makeResponse` emits one text part per call and
-  `effect/ai` joins them into one string, which fails to decode with `StructuredOutputError`.
+- The models without native structured output, which are the Claude 3 models and Claude Sonnet 4
+  and Opus 4, come from Anthropic's table. Claude 3 Haiku, Claude 3 Sonnet, and Sonnet 4 have
+  reached end of life in `eu-west-1`, and the probe did not try the others.
+- Fable 5.1 and Mythos 5.1 are treated as rejecting a forced `toolChoice`, as Opus 5.5 and Sonnet
+  5.5 did in the probe. Nobody has checked them on Bedrock.
+- Every model ID the rule does not name gets `outputConfig.textFormat`, including the models of
+  other providers on Bedrock. The probe sent only Claude models.
+
+## Fable 5 and 5.1 reject every request
+
+In the same probe, Bedrock answered every request to `global.anthropic.claude-fable-5` and
+`global.anthropic.claude-fable-5-1` with a `ValidationException`: `The model returned the following
+errors: data retention mode 'default' is not available for this model`. The requests carried no
+data retention setting, and the Bedrock Runtime Smithy model in `.repos/refs/api-models-aws` has no
+field that names one. Which account setting, inference profile, or request field makes these models
+usable is open.
 
 ## Video blocks
 

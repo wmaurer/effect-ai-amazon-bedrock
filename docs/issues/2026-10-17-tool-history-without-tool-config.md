@@ -140,3 +140,32 @@ Tests:
 Pass the toolkit that produced the history, with `toolChoice: "auto"`. This works on every model in the table
 above. The model may then call a tool instead of answering. A caller that cannot accept that needs to remove
 the tool blocks from the history first, for example by rewriting them as text.
+
+## Resolution
+
+Fixed by fork commit `bbff465e30` on `feat/ai-amazon-bedrock`
+(`fix(amazon-bedrock): handle tool history in a request without tools`). `makeRequest` now looks
+for `toolUse` and `toolResult` blocks in the converted messages before it sends anything.
+
+- `generateObject` takes the object-tool path on every model when such a prompt goes out with no
+  tools, so the request carries the object tool as its `toolConfig`. The tool is forced or
+  unforced as `Config.forcedToolChoice` and the model ID decide. Opus 5.5 now gets native
+  structured output. For the two Opus 5.5 rows without tools (no toolkit, and `"none"`) this sends
+  a request byte-identical to the one in the table. The Opus 5.5 `"auto"` row now goes native,
+  with the toolkit, and has not run live. The object tool, forced, also goes out for the
+  `generateObject` rows that got a 400 on Opus 4.8 and Sonnet 5, which has not run live either.
+- `generateText` and `streamText` fail with `AiError.InvalidUserInputError` before any HTTP request
+  when the request they built carries no `toolConfig`. A `toolConfig` from the request config
+  counts. The description names the causes and the `"auto"` workaround.
+
+Unit tests cover the error cases with no request sent, the `generateObject` fallback on the
+default test model and on Opus 5.5, and a `toolConfig` from the request config. The live tools
+suite has a check of the `"auto"` workaround with `generateObject` on the default model, which has
+not run yet. The README describes the limit and the workaround under "Check what the provider does
+not support".
+
+The AI SDK's Bedrock provider takes the other way out: when a request has no tools, it removes the
+tool calls and results from the prompt and returns a warning
+(`packages/amazon-bedrock/src/amazon-bedrock-chat-language-model.ts` in `vercel/ai`). This provider
+does not, because the tool results are what the next answer is built from. Removing them changes
+the conversation the model sees, and the caller learns about it only from a warning.
