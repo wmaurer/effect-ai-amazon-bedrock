@@ -201,7 +201,7 @@ const fromProvider = <R>(provider: CredentialProvider<R>): Effect.Effect<Authent
             : Math.min(fallbackTimeToLive, lastGood.expiration.getTime() - now)
         }
       }
-      return yield* Effect.fail(result.failure)
+      return yield* result.failure
     })
 
     const [cached, clear] = yield* Effect.cachedInvalidateWithTTL(
