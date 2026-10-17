@@ -8,6 +8,7 @@
     "lint": "oxlint -f unix && dprint check",
     "lint-fix": "oxlint --fix && dprint fmt",
     "test": "vitest",
+    "test:live": "EFFECT_INTEGRATION_TESTS=1 vitest run --no-file-parallelism test/live",
     "deps:fetch": "node scripts/repos.js deps fetch",
     "deps:check": "node scripts/repos.js deps check",
     "refs:fetch": "node scripts/repos.js refs fetch"

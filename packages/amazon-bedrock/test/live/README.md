@@ -1,70 +1,91 @@
-# Live Bedrock checks — TEMPORARY, DELETE BEFORE SQUASHING
+# Run the live Bedrock checks
 
-**This entire directory comes out before the branch is squashed for the upstream PR.**
-`rm -rf packages/ai/amazon-bedrock/test/live` removes every trace; nothing outside it
-refers to it, and no build, config or CI file needs editing afterwards.
+The suites in this directory call real Amazon Bedrock, and each run costs money. They are the only tests in the package that decode bytes AWS sent. The unit tests stub `HttpClient` and build their event-stream frames from the same reading of the AWS specification as `AmazonBedrockEventStream.ts`, so a misreading that both share passes both. The "Verification gaps" section of `docs/TODO.md` records what the live runs have settled.
 
-## What these are
+The suites stay in this repository. An upstream pull request to Effect leaves the `test/live` directory out.
 
-Every other test in this package runs against a stubbed `HttpClient`. These run against
-real Amazon Bedrock and cost real money. They exist to break the circularity noted under
-"Verification gaps" in the repo-root `TODO.md`: the event-stream parser and its unit-test
-frames were both written from the same reading of the AWS spec, so the unit tests cannot
-catch a shared misreading. Only bytes AWS actually produced can.
+## Before you start
 
-They replace the earlier throwaway `smoke-bedrock.ts`.
+- Run every command in this guide from the repository root. `pnpm test:live` is a script in the root `package.json`. In `packages/amazon-bedrock`, pnpm stops with `Command "test:live" not found`.
+- Get temporary AWS credentials. AWS STS issues them for a session, for example when you assume an IAM role or sign in through IAM Identity Center. They are three values: an access key id that starts with `ASIA`, a secret access key, and a session token. They stop working when the session expires.
+- Do not use a long-lived IAM user key, whose id starts with `AKIA`. It has no session token, and one test in the errors suite needs AWS to reject a request that leaves the token out.
+- Check that the IAM policy behind the credentials allows `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream`. The default models are EU geo inference profiles, so the policy must allow the `inference-profile` ARN and also the `foundation-model` ARN in every region that the profile sends requests to.
 
-| File                                         | Covers                                                                                                                                            |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AmazonBedrock.integration.test.ts`          | `generateText`, `generateObject`, the `max_tokens` stop reason, cache checkpoints at both TTLs, the usage-disjointness oracle                     |
-| `AmazonBedrockStream.integration.test.ts`    | real `vnd.amazon.eventstream` bytes: multi-frame text deltas, a tool call whose input JSON is split across frames                                 |
-| `AmazonBedrockContent.integration.test.ts`   | image blocks, document blocks, citations                                                                                                          |
-| `AmazonBedrockErrors.integration.test.ts`    | the `x-amzn-errortype` -> `AuthenticationError.kind` table, against exceptions AWS actually sent, plus the signing path with no session token     |
-| `AmazonBedrockTools.integration.test.ts`     | the tool round-trip: a `toolResult` sent back to Converse against the `toolUse` it answers                                                        |
-| `AmazonBedrockReasoning.integration.test.ts` | extended thinking via `additionalModelRequestFields`: the `reasoningContent` decode, the `signature` round-trip, reasoning deltas over the stream |
+## Run the suites
 
-They have already earned their keep twice. The document suite caught Converse rejecting
-every uncited `text/*` document, because a `text` document source is only accepted alongside
-a citations config — the Smithy model lists `text` as an unconditional member of the union,
-so neither the model nor a stubbed test could have shown it. The error suite then found that
-a request with no `Authorization` header comes back as `AccessDeniedException`, not the
-`MissingAuthenticationTokenException` the documentation implies.
+1. Install the dependencies:
 
-## Why they never run by accident
+   ```sh
+   pnpm install
+   ```
 
-The filenames end in `.integration.test.ts`, which `vitest.config.ts:51` excludes unless
-`EFFECT_INTEGRATION_TESTS=1`. As a second guard, each suite skips itself when
-`AWS_ACCESS_KEY_ID` is unset, so an integration run on a machine without AWS credentials
-reports skips rather than failures. Both guards must open before a single billable call
-is made.
+2. Export the credentials. These lines are bash and zsh syntax:
 
-## Running them
+   ```sh
+   export AWS_ACCESS_KEY_ID=...
+   export AWS_SECRET_ACCESS_KEY=...
+   export AWS_SESSION_TOKEN=...
+   ```
 
-Credentials come from the environment. With the `with-aws` fish function:
+   The suites read only these environment variables. They ignore `~/.aws/credentials` and AWS profiles.
 
-```fish
-with-aws -r eu-west-1 env EFFECT_INTEGRATION_TESTS=1 \
-  pnpm vitest run --project @effect/ai-amazon-bedrock --no-file-parallelism
+3. Run the suites:
+
+   ```sh
+   pnpm test:live
+   ```
+
+   Every file and every test passes. With the current suites, the summary is:
+
+   ```text
+   Test Files  6 passed (6)
+        Tests  22 passed (22)
+   ```
+
+## Two gates keep the suites from running by accident
+
+1. The root `vitest.config.ts` excludes every `*.integration.test.ts` file unless `EFFECT_INTEGRATION_TESTS=1`. `pnpm test` does not set the variable, so it never collects these files. `pnpm test:live` sets it, which opens the first gate.
+2. Each suite skips itself when `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` is unset. A variable set to an empty string counts as set.
+
+## Choose the region and the model
+
+`helpers.ts` holds the defaults. `REGION` is the region, and `AWS_REGION` replaces it. `MODEL` is the model, and `BEDROCK_MODEL_ID` replaces it. Some `generateObject` tests also call `OPUS_5_5`, and `BEDROCK_MODEL_ID` does not change those tests. Both default models are EU geo inference profiles, so if you set `AWS_REGION`, set it to an EU region.
+
+## Run one suite
+
+Put the start of the suite's file name after `test/live`, up to and including `.integration`:
+
+```sh
+EFFECT_INTEGRATION_TESTS=1 pnpm vitest run --no-file-parallelism test/live/AmazonBedrockErrors.integration
 ```
 
-Without `with-aws`, export `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
-`AWS_SESSION_TOKEN` (only for temporary `ASIA…` credentials) and `AWS_REGION` yourself.
+vitest matches the filter against any part of the path. Every file name starts with `AmazonBedrock`, so `test/live/AmazonBedrock` matches all six files. To run only the core suite, use `test/live/AmazonBedrock.integration`. `pnpm test:live` always runs every file, even with a file name after it.
 
-`--no-file-parallelism` is not optional. Each suite is declared `{ concurrent: false }`, but vitest
-still runs the files concurrently, and the resulting burst exceeds the on-demand
-tokens-per-minute quota for Sonnet 4.5 in `eu-west-1` — runs without it fail two or three
-tests with `RateLimitError`, at random. That is an account quota, not a provider defect.
+Keep `--no-file-parallelism` whenever the filter can match more than one file. Without the flag, vitest runs the files at the same time. Each suite declares `{ concurrent: false }`, but that orders only the tests inside one file. The burst of calls can exceed the account's on-demand tokens-per-minute quota, and then some tests fail with `RateLimitError`.
 
-`BEDROCK_MODEL_ID` overrides the model. The default is the EU geo inference profile —
-Sonnet 4.5 has no in-region support in any region, so the bare foundation-model id is
-rejected with "Invocation of model ID … with on-demand throughput isn't supported."
-Any IAM policy therefore needs `inference-profile` ARNs, not just `foundation-model` ones.
+## Read a failed run
 
-## Cost
+- Every file is skipped and the exit code is 0. `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` is unset in this shell. A skipped run is not a pass.
+- Most tests fail with `AuthenticationError` of kind `InvalidKey`, HTTP status 403, and `x-amzn-errortype` `UnrecognizedClientException`. AWS does not know the access key id, or the session token does not belong to it. Export all three values again from one session. If AWS does not know the key id, "classifies a bad signature as InvalidKey" fails too, with `UnrecognizedClientException` where it expects `InvalidSignatureException`. The test pairs your access key id with a wrong secret, so it passes only with a key id that AWS knows.
+- Most tests fail with `AuthenticationError` of kind `ExpiredKey` and `x-amzn-errortype` `ExpiredTokenException`. The session has expired. Get new credentials.
+- Only "signs without a session token when none is configured" fails, because its request succeeds. The credentials are a long-lived `AKIA` key.
+- Tests fail with `AuthenticationError` of kind `InsufficientPermissions` and `x-amzn-errortype` `AccessDeniedException`. The IAM policy or the account's model access does not cover a model or a region that the run uses.
+- Some tests fail with `RateLimitError`. If you ran vitest yourself, add `--no-file-parallelism`. Otherwise wait a minute and run again.
 
-Roughly twenty calls per full run, five of which are rejected before they reach a
-model and so cost nothing. The prompts are tiny except the cache-point suite,
-which deliberately sends a >1024-token prefix twice (Sonnet 4.5's minimum checkpoint
-size) and pays one cache write per run — a few cents. The prefix carries a per-run nonce
-so the first call is always a genuine write; without it a warm 5-minute cache from a
-previous run would turn it into a read and the write-side assertion would be vacuous.
+## A full run makes about 25 Bedrock calls
+
+AWS rejects every call of the errors suite before it reaches a model, so those calls cost nothing. The other prompts are short. Two groups of tests cost more:
+
+- The cache tests send a system prompt of more than a thousand lines and pay for two cache writes.
+- The reasoning tests allow up to a few thousand output tokens per call.
+
+## What each suite checks
+
+| File                                         | What it checks                                                                                                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AmazonBedrock.integration.test.ts`          | `generateText`, `generateObject` on the native and the object-tool paths, the `max_tokens` stop reason, cache checkpoints at both TTLs, the usage arithmetic |
+| `AmazonBedrockStream.integration.test.ts`    | Text deltas over several event-stream frames, and a tool call whose input JSON is split across frames                                                        |
+| `AmazonBedrockContent.integration.test.ts`   | Image blocks, document blocks, and citations                                                                                                                 |
+| `AmazonBedrockErrors.integration.test.ts`    | The `x-amzn-errortype` values behind `AuthenticationError.kind`, and signing with no session token                                                           |
+| `AmazonBedrockTools.integration.test.ts`     | A `toolResult` sent back against its `toolUse`, and `generateObject` with tool history in the prompt                                                         |
+| `AmazonBedrockReasoning.integration.test.ts` | Extended thinking through `additionalModelRequestFields`, the signed reasoning block sent back in a later turn, and reasoning deltas over the stream         |

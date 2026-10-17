@@ -37,13 +37,13 @@ To build the package, run `pnpm build` in `packages/amazon-bedrock`. It emits `d
 
 `pnpm test` runs the unit tests from the root vitest config. They stub `HttpClient`, so they make no network calls.
 
-The suites in `packages/amazon-bedrock/test/live/` call real Bedrock and cost money. Two gates keep them from running by accident. `vitest.config.ts` skips every `*.integration.test.ts` file unless `EFFECT_INTEGRATION_TESTS=1`, and each suite skips itself when `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` is unset. Run them only when the user asks:
+The suites in `packages/amazon-bedrock/test/live/` call real Bedrock and cost money. Two gates keep them from running by accident. `vitest.config.ts` skips every `*.integration.test.ts` file unless `EFFECT_INTEGRATION_TESTS=1`, and each suite skips itself when `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` is unset. Run them only when the user asks, and run them from the repository root:
 
 ```sh
-EFFECT_INTEGRATION_TESTS=1 AWS_REGION=eu-west-1 pnpm vitest run --no-file-parallelism packages/amazon-bedrock/test/live
+pnpm test:live
 ```
 
-Keep `--no-file-parallelism`. If the files run at the same time, the burst exceeds the account's tokens-per-minute quota and some tests fail with `RateLimitError`.
+The script sets `EFFECT_INTEGRATION_TESTS=1` and passes `--no-file-parallelism`. Keep that flag if you run vitest yourself. If the files run at the same time, the burst can exceed the account's tokens-per-minute quota and some tests fail with `RateLimitError`. `packages/amazon-bedrock/test/live/README.md` says which credentials the suites need, how to choose the region and the model, and how to read a failed run.
 
 ## Effect source and docs (`node_modules/`)
 
