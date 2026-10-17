@@ -10,6 +10,7 @@
 - Fail a request with an `AuthenticationError` of kind `Unknown` when the promise of a function provider rejects, and of kind `MissingKey` when a provider returns an empty key.
 - An `Effect` provider fails with an `AiError`, which the request fails with unchanged, or with an `AiError` reason, which the client puts in an `AiError`. The services that it requires become requirements of the layer through a new type parameter. It runs with the services of the request first, and the services that the layer was built with fill in the rest, so a span that it opens is a child of the request's span.
 - Add the `apiKey` option for Bedrock API keys. The client sends the key as `Authorization: Bearer <key>` in place of a SigV4 signature, and an `AiError` shows the header as `<redacted>`.
+- AWS rejects an API key that it does not accept with `AccessDeniedException`, as it rejects a missing IAM permission, so the request fails with an `AuthenticationError` of kind `InsufficientPermissions`.
 - Add the `Credentials`, `CredentialProvider`, and `ConfigOptions` types. `Options`, `ConfigOptions`, `CredentialProvider`, `make`, `layer`, and `layerConfig` take a type parameter `R` for the services of an `Effect` provider. It defaults to `never`.
 - A retry policy in `transformClient` or `AmazonBedrockConfig.withClientTransform` signs each attempt again with the credentials of the request, and does not retry a provider that fails.
 
