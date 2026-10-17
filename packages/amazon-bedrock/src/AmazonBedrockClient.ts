@@ -15,7 +15,6 @@
  * @stability unstable
  * @since 0.1.0
  */
-import { AwsV4Signer } from "aws4fetch"
 import type * as AiError from "effect/ai/AiError"
 import * as Array from "effect/Array"
 import type * as Config from "effect/Config"
@@ -28,13 +27,13 @@ import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
-import * as Predicate from "effect/Predicate"
-import * as Redacted from "effect/Redacted"
+import type * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import { AmazonBedrockConfig } from "./AmazonBedrockConfig.ts"
 import * as EventStream from "./AmazonBedrockEventStream.ts"
 import type { ConverseRequest } from "./AmazonBedrockSchema.ts"
 import { ConverseResponse, ConverseResponseStreamEvent } from "./AmazonBedrockSchema.ts"
+import * as Authentication from "./internal/credentials.ts"
 import * as Errors from "./internal/errors.ts"
 
 // =============================================================================
@@ -250,12 +249,16 @@ const withRedactedHeaders = Effect.updateService(Headers.CurrentRedactedNames, a
  * @since 0.1.0
  */
 export const make = <R = never>(options: Options<R>): Effect.Effect<Service, never, HttpClient.HttpClient | R> =>
+  makeUnsafe(options)
+
+// Takes each authentication field as optional, as `layerConfig` reads them.
+// `Authentication.make` dies on a mix of the ways to authenticate.
+const makeUnsafe = <R>(
+  options: CommonOptions & Authentication.AuthenticationOptions<R>
+): Effect.Effect<Service, never, HttpClient.HttpClient | R> =>
   Effect.gen(function*() {
-    if (options.accessKeyId === undefined) {
-      return yield* Effect.die(new Error("not implemented"))
-    }
-    const keys = options
     const region = options.region ?? "us-east-1"
+    const authenticator = yield* Authentication.make(options)
 
     const baseClient = yield* HttpClient.HttpClient
 
@@ -266,23 +269,7 @@ export const make = <R = never>(options: Options<R>): Effect.Effect<Service, nev
           HttpClientRequest.acceptJson
         )
       ),
-      HttpClient.mapRequestEffect(Effect.fnUntraced(function*(request) {
-        const originalHeaders = request.headers
-        const signer = new AwsV4Signer({
-          service: "bedrock",
-          url: request.url,
-          method: request.method,
-          headers: Object.entries(originalHeaders),
-          body: prepareBody(request.body),
-          region,
-          accessKeyId: keys.accessKeyId,
-          secretAccessKey: Redacted.value(keys.secretAccessKey),
-          ...(keys.sessionToken ? { sessionToken: Redacted.value(keys.sessionToken) } : {})
-        })
-        const { headers: signedHeaders } = yield* Effect.promise(() => signer.sign())
-        const headers = Headers.merge(originalHeaders, Headers.fromInput(signedHeaders))
-        return HttpClientRequest.setHeaders(request, headers)
-      })),
+      HttpClient.mapRequestEffect(Authentication.authenticateRequest(region)),
       options.transformClient ? options.transformClient : identity
     )
 
@@ -293,15 +280,24 @@ export const make = <R = never>(options: Options<R>): Effect.Effect<Service, nev
       return config?.transformClient ? config.transformClient(httpClientOk) : httpClientOk
     })
 
+    const resolveCredentials = (method: string) =>
+      Effect.mapError(authenticator.resolve, Errors.mapCredentialProviderError(method))
+
     const converse: Service["converse"] = ({ payload: { modelId, ...body } }) =>
-      Effect.flatMap(withConfigClient(), (client) => {
+      Effect.gen(function*() {
+        const client = yield* withConfigClient()
+        const credentials = yield* resolveCredentials("converse")
         const request = HttpClientRequest.post(`/model/${modelId}/converse`, {
           body: HttpBody.jsonUnsafe(body)
         })
-        return client.execute(request).pipe(
+        return yield* client.execute(request).pipe(
+          Effect.provideService(Authentication.CurrentRequestCredentials, credentials),
           Effect.flatMap(HttpClientResponse.schemaBodyJson(ConverseResponse)),
           Effect.catchTags({
-            HttpClientError: (error) => Errors.mapHttpClientError(error, "converse"),
+            HttpClientError: (error) =>
+              Errors.mapHttpClientError(error, "converse").pipe(
+                Effect.tapError(Authentication.invalidateIfRejected(authenticator, credentials))
+              ),
             SchemaError: (error) => Effect.fail(Errors.mapSchemaError(error, "converse"))
           }),
           withRedactedHeaders
@@ -313,18 +309,27 @@ export const make = <R = never>(options: Options<R>): Effect.Effect<Service, nev
         body: HttpBody.jsonUnsafe(body)
       })
       return Stream.unwrap(
-        Effect.map(withConfigClient(), (client) =>
-          client.execute(request).pipe(
+        Effect.gen(function*() {
+          const client = yield* withConfigClient()
+          const credentials = yield* resolveCredentials("converseStream")
+          return client.execute(request).pipe(
+            Effect.provideService(Authentication.CurrentRequestCredentials, credentials),
             Effect.map((response) => response.stream),
             Stream.unwrap,
             Stream.pipeThroughChannel(EventStream.makeChannel(ConverseResponseStreamEvent)),
             Stream.catchTags({
-              HttpClientError: (error) => Stream.fromEffect(Errors.mapHttpClientError(error, "converseStream")),
+              HttpClientError: (error) =>
+                Stream.fromEffect(
+                  Errors.mapHttpClientError(error, "converseStream").pipe(
+                    Effect.tapError(Authentication.invalidateIfRejected(authenticator, credentials))
+                  )
+                ),
               SchemaError: (error) => Stream.fail(Errors.mapSchemaError(error, "converseStream")),
               EventStreamError: (error) => Stream.fail(Errors.mapEventStreamError(error, "converseStream"))
             }),
             Stream.updateService(Headers.CurrentRedactedNames, appendRedactedHeaders)
-          ))
+          )
+        })
       )
     }
 
@@ -364,53 +369,18 @@ export const layerConfig = <R = never>(
   Layer.effect(
     AmazonBedrockClient,
     Effect.gen(function*() {
-      const apiUrl = Predicate.isNotUndefined(options.apiUrl)
-        ? yield* options.apiUrl :
-        undefined
-      if (options.accessKeyId === undefined) {
-        return yield* Effect.die(new Error("not implemented"))
-      }
-      const accessKeyId = yield* options.accessKeyId
-      const secretAccessKey = yield* options.secretAccessKey
-      const sessionToken = Predicate.isNotUndefined(options.sessionToken)
-        ? yield* options.sessionToken :
-        undefined
-      const region = Predicate.isNotUndefined(options.region)
-        ? yield* options.region :
-        undefined
-      return yield* make({
-        apiUrl,
-        accessKeyId,
-        secretAccessKey,
-        sessionToken,
-        region,
+      return yield* makeUnsafe({
+        apiUrl: yield* readOptional(options.apiUrl),
+        region: yield* readOptional(options.region),
+        accessKeyId: yield* readOptional(options.accessKeyId),
+        secretAccessKey: yield* readOptional(options.secretAccessKey),
+        sessionToken: yield* readOptional(options.sessionToken),
+        apiKey: yield* readOptional(options.apiKey),
+        credentialProvider: options.credentialProvider,
         transformClient: options.transformClient
       })
     })
   )
 
-// =============================================================================
-// Utilities
-// =============================================================================
-
-const prepareBody = (body: HttpBody.HttpBody): string => {
-  switch (body._tag) {
-    case "Empty": {
-      return ""
-    }
-    case "Raw":
-    case "Uint8Array": {
-      if (typeof body.body === "string") {
-        return body.body
-      }
-      if (body.body instanceof Uint8Array) {
-        return new TextDecoder().decode(body.body)
-      }
-      if (body.body instanceof ArrayBuffer) {
-        return new TextDecoder().decode(body.body)
-      }
-      return JSON.stringify(body.body)
-    }
-  }
-  throw new Error("Unsupported HttpBody: " + body._tag)
-}
+const readOptional = <A>(config: Config.Config<A> | undefined): Effect.Effect<A | undefined, Config.ConfigError> =>
+  config === undefined ? Effect.undefined : config
