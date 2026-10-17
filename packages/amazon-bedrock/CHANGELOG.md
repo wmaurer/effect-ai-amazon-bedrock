@@ -8,6 +8,7 @@
 - Models of other providers that accepted `outputConfig.textFormat` in the probes, such as gpt-5.x, Grok, Qwen, GLM, MiniMax, DeepSeek V3.2, and Mistral Large 3, also get the object tool now. The object tool replaces the tools that you pass to `generateObject`, and in 0.2.0 these models kept them. Set `structuredOutputs: true` to keep the 0.2.0 behavior.
 - Force the object tool with `toolChoice` `{ any: {} }` in place of `{ tool: { name } }`. The object tool is the only tool in its request, so both force it, and Mistral Large 2402 and Pixtral Large accept only `any`. A `toolChoice` that you pass with your own tools goes to Bedrock as before.
 - Fail `streamText` with an `AiError` whose reason is `InvalidOutputError` when Bedrock streams tool input that is not valid JSON. In 0.2.0 the stream died with a defect. Bedrock streamed such input for Qwen3 32B in each probe run.
+- Decode a stop reason outside the nine that the Converse API names, and give it the finish reason `"other"`. In 0.2.0 such a reason failed `generateText` and `streamText` with an `InvalidOutputError`, and the text before it was lost. The `StopReason` type now admits any string, so a `switch` over it that was exhaustive needs a `default` case. The new `KnownStopReason` schema holds the nine.
 
 ## 0.2.0
 
