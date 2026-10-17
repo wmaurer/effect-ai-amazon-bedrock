@@ -1997,6 +1997,33 @@ describe("AmazonBedrockLanguageModel", () => {
         }
       }))
 
+    it.effect("fails with an InvalidOutputError when the streamed tool input is not JSON", () =>
+      Effect.gen(function*() {
+        // Qwen3 32B on Bedrock streamed tool input without its opening `{"`.
+        const error = yield* Effect.flip(streamToolParts([
+          eventFrame("messageStart", { role: "assistant" }),
+          eventFrame("contentBlockStart", {
+            contentBlockIndex: 0,
+            start: { toolUse: { toolUseId: "tu_1", name: "GlobTool" } }
+          }),
+          eventFrame("contentBlockDelta", {
+            contentBlockIndex: 0,
+            delta: { toolUse: { input: "city\": \"Zurich\"}" } }
+          }),
+          eventFrame("contentBlockStop", { contentBlockIndex: 0 }),
+          eventFrame("messageStop", { stopReason: "tool_use" }),
+          eventFrame("metadata", { usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 } })
+        ]))
+
+        assert.strictEqual(error._tag, "AiError")
+        assert.strictEqual(error.reason._tag, "InvalidOutputError")
+        assert.strictEqual(
+          error.message,
+          "AmazonBedrockLanguageModel.makeStreamResponse: Invalid output: Bedrock streamed input for the " +
+            "`GlobTool` tool that is not valid JSON: city\": \"Zurich\"}"
+        )
+      }))
+
     it.effect("keeps text and tool blocks separate by content-block index", () =>
       Effect.gen(function*() {
         const parts = yield* streamToolParts([

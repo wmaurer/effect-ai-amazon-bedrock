@@ -1591,6 +1591,19 @@ const makeStreamResponse: (
             const block = toolBlocks.get(index)
             if (Predicate.isNotUndefined(block)) {
               toolBlocks.delete(index)
+              const params = yield* Effect.try({
+                // A tool taking no arguments streams no deltas at all.
+                try: () => Tool.unsafeSecureJsonParse(block.params.length === 0 ? "{}" : block.params),
+                catch: () =>
+                  AiError.make({
+                    module: "AmazonBedrockLanguageModel",
+                    method: "makeStreamResponse",
+                    reason: new AiError.InvalidOutputError({
+                      description: `Bedrock streamed input for the \`${block.name}\` tool that is not valid JSON: ` +
+                        truncate(block.params, 500)
+                    })
+                  })
+              })
               parts.push({
                 type: "tool-params-end",
                 id: block.id
@@ -1599,8 +1612,7 @@ const makeStreamResponse: (
                 type: "tool-call",
                 id: block.id,
                 name: block.name,
-                // A tool taking no arguments streams no deltas at all.
-                params: Tool.unsafeSecureJsonParse(block.params.length === 0 ? "{}" : block.params),
+                params,
                 providerExecuted: false
               })
             }
@@ -1744,3 +1756,6 @@ const trimIfLast = (
   isLastPart: boolean,
   text: string
 ) => isLastGroup && isLastMessage && isLastPart ? text.trim() : text
+
+const truncate = (text: string, maxLength: number): string =>
+  text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
