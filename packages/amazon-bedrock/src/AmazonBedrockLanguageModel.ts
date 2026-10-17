@@ -1126,16 +1126,35 @@ interface ModelCapabilities {
 }
 
 /**
- * Returns what a model accepts for structured output, optimistically assuming
- * modern capabilities for unknown IDs. Matched by substring, so foundation
- * model ids and inference profile ids (`eu.anthropic.…`) both resolve.
+ * Returns what a model accepts for structured output, looked up by the
+ * provider that the model ID names: `anthropic` in
+ * `eu.anthropic.claude-opus-4-8`, `amazon` in `amazon.nova-pro-v1:0`. A
+ * foundation model or inference profile ARN names its model at the end. Other
+ * ARNs, such as an application inference profile or a provisioned model, do
+ * not. They get the Claude rules, which give them the native structured output
+ * and forced tool of 0.2.0, on the unmeasured assumption that most of them
+ * wrap a Claude model.
  *
+ * Probes on 2026-10-17, one run per model and call unless noted:
+ *
+ * - Only Claude gets native structured output. Nova, Mistral Large 2402 and
+ *   Pixtral Large in eu-west-1, and Llama, Palmyra, DeepSeek R1, Mistral 7B
+ *   and Mixtral in us-east-1, answer `outputConfig` with a 400. gpt-oss-120b
+ *   accepts it but wrote text before the JSON in 3 of 4 runs.
+ * - The forced object tool, sent as `{ any: {} }`, returned the object on 15
+ *   of 16 models in eu-west-1, Claude Haiku 4.5 and Opus 4.8 included, and
+ *   on all 17 models in us-east-1 that accept a forced tool. Magistral Small
+ *   fails every object path.
+ * - Llama 3.1, 3.3 and 4 and Palmyra X4 and X5 (`meta`, `writer`) answer
+ *   `any` with a 400 in us-east-1, and so does each of them that the probe
+ *   sent a named `tool`, all but Llama 3.1 8B. They get the unforced tool. It returned the object on Llama 3.1 8B, Llama 4 Scout and Maverick
+ *   and Palmyra X5, and a wrong object on Llama 3.1 70B and 3.3 70B.
  * - Claude models before Opus 4.1 / Sonnet 4.5 predate structured output, as
  *   in the Anthropic provider. This is not checked on Bedrock: a probe of 17
- *   Claude inference profiles in eu-west-1 on 2026-10-17 found Claude 3 Haiku,
- *   Claude 3 Sonnet and Sonnet 4 at end of life there, and did not try Claude
- *   3 Opus, 3.5 Haiku, 3.5 Sonnet, 3.7 Sonnet, Opus 4 or Opus 4.1.
- * - Every Claude profile that served the probe's requests (12 of 17)
+ *   Claude inference profiles in eu-west-1 found Claude 3 Haiku, Claude 3
+ *   Sonnet and Sonnet 4 at end of life there, and did not try Claude 3 Opus,
+ *   3.5 Haiku, 3.5 Sonnet, 3.7 Sonnet, Opus 4 or Opus 4.1.
+ * - Every Claude profile that served that probe's requests (12 of 17)
  *   accepted `outputConfig.textFormat`: Haiku 4.5 and 5.5, Opus 4.5 to 4.8, 5
  *   and 5.5, and Sonnet 4.5, 4.6, 5 and 5.5. Fable 5 and 5.1 rejected every
  *   request, with or without `textFormat`, with a data-retention
@@ -1148,22 +1167,50 @@ interface ModelCapabilities {
  * @see https://platform.claude.com/docs/en/build-with-claude/structured-outputs
  */
 const getModelCapabilities = (modelId: string): ModelCapabilities => {
-  const supportsForcedToolChoice = !(
-    modelId.includes("claude-opus-5-5") ||
-    modelId.includes("claude-sonnet-5-5") ||
-    modelId.includes("claude-fable-5-1") ||
-    modelId.includes("claude-mythos-5-1")
-  )
-  const supportsStructuredOutput = !(
-    modelId.includes("claude-sonnet-4-0") ||
-    modelId.includes("claude-sonnet-4-20250514") ||
-    modelId.includes("claude-3-7-sonnet") ||
-    modelId.includes("claude-opus-4-0") ||
-    modelId.includes("claude-opus-4-20250514") ||
-    modelId.includes("claude-3-")
-  )
-  return { supportsStructuredOutput, supportsForcedToolChoice }
+  const named = modelId.startsWith("arn:") ? namingArn.exec(modelId)?.[1] : modelId
+  if (Predicate.isUndefined(named)) {
+    return claudeCapabilities(modelId)
+  }
+  // `provider.model`, or `geo.provider.model` for an inference profile.
+  const [first = "", second = ""] = named.split(".")
+  const byProvider = capabilitiesByProvider.get(first) ?? capabilitiesByProvider.get(second)
+  return Predicate.isUndefined(byProvider) ? otherProvider : byProvider(named)
 }
+
+// Of the ARNs Converse accepts, only these two end in the ID of the model
+// they invoke.
+const namingArn = /^arn:[^:]+:bedrock:[^:]*:[^:]*:(?:foundation-model|inference-profile)\/(.+)$/
+
+const otherProvider: ModelCapabilities = { supportsStructuredOutput: false, supportsForcedToolChoice: true }
+
+const unforcedTool: ModelCapabilities = { supportsStructuredOutput: false, supportsForcedToolChoice: false }
+
+const claudeWithoutStructuredOutput = [
+  "claude-sonnet-4-0",
+  "claude-sonnet-4-20250514",
+  "claude-3-7-sonnet",
+  "claude-opus-4-0",
+  "claude-opus-4-20250514",
+  "claude-3-"
+]
+
+const claudeWithoutForcedToolChoice = [
+  "claude-opus-5-5",
+  "claude-sonnet-5-5",
+  "claude-fable-5-1",
+  "claude-mythos-5-1"
+]
+
+const claudeCapabilities = (modelId: string): ModelCapabilities => ({
+  supportsStructuredOutput: !claudeWithoutStructuredOutput.some((id) => modelId.includes(id)),
+  supportsForcedToolChoice: !claudeWithoutForcedToolChoice.some((id) => modelId.includes(id))
+})
+
+const capabilitiesByProvider = new Map<string, (modelId: string) => ModelCapabilities>([
+  ["anthropic", claudeCapabilities],
+  ["meta", () => unforcedTool],
+  ["writer", () => unforcedTool]
+])
 
 const tryJsonSchema = (schema: Schema.Top, method: string) =>
   Effect.try({

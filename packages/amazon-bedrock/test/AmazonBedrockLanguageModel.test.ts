@@ -1264,6 +1264,7 @@ describe("AmazonBedrockLanguageModel", () => {
         usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
         stopReason: "end_turn"
       })
+    const claude = "eu.anthropic.claude-opus-4-8"
 
     it.effect("requests native structured output and decodes the text block", () =>
       Effect.gen(function*() {
@@ -1277,13 +1278,11 @@ describe("AmazonBedrockLanguageModel", () => {
           prompt: "Give me a person",
           objectName: "person",
           schema: Schema.Struct({ name: Schema.String, age: Schema.Number }).annotate({ description: "A person" })
-        }).pipe(Effect.provide(layersFor(handler)))
+        }).pipe(Effect.provide(layersFor(handler, claude)))
 
         assert.deepStrictEqual(result.value, { name: "Ada", age: 36 })
 
         const body = yield* getRequestBody(captured!)
-        // Claude Opus 5.5 and later reject a forced `toolChoice` with a 400, so json mode
-        // must not fall back to a synthetic tool.
         assert.isUndefined(body.toolConfig)
         const textFormat = body.outputConfig.textFormat
         assert.strictEqual(textFormat.type, "json_schema")
@@ -1329,7 +1328,7 @@ describe("AmazonBedrockLanguageModel", () => {
             line: Schema.Union([Schema.Int, Schema.String]),
             owner: Schema.NullOr(Schema.Int)
           })
-        }).pipe(Effect.provide(layersFor(handler)))
+        }).pipe(Effect.provide(layersFor(handler, claude)))
 
         const body = yield* getRequestBody(captured!)
         const props = JSON.parse(body.outputConfig.textFormat.structure.jsonSchema.schema).properties
@@ -1355,13 +1354,115 @@ describe("AmazonBedrockLanguageModel", () => {
           schema: Schema.Struct({ ok: Schema.Boolean })
         }).pipe(
           AmazonBedrockLanguageModel.withConfigOverride({ outputConfig: { effort: "low" } }),
-          Effect.provide(layersFor(handler))
+          Effect.provide(layersFor(handler, claude))
         )
 
         const body = yield* getRequestBody(captured!)
         assert.strictEqual(body.outputConfig.effort, "low")
         assert.strictEqual(body.outputConfig.textFormat.type, "json_schema")
       }))
+
+    describe("on the path the model ID selects", () => {
+      const json = {
+        type: "object",
+        properties: { ok: { type: "boolean" } },
+        required: ["ok"],
+        additionalProperties: false
+      }
+      const objectTool = (toolChoice: unknown) => ({
+        tools: [{ toolSpec: { name: "result", description: "Respond with a JSON object", inputSchema: { json } } }],
+        toolChoice
+      })
+      const paths = {
+        native: {
+          system: [],
+          outputConfig: {
+            textFormat: {
+              type: "json_schema",
+              structure: { jsonSchema: { schema: JSON.stringify(json), name: "result" } }
+            }
+          },
+          toolConfig: undefined
+        },
+        "the forced tool": { system: [], outputConfig: undefined, toolConfig: objectTool({ any: {} }) },
+        "the unforced tool": {
+          system: [{ text: "Respond only by calling the `result` tool. Do not answer in text." }],
+          outputConfig: undefined,
+          toolConfig: objectTool({ auto: {} })
+        }
+      }
+
+      const generate = (
+        model: string,
+        config: typeof AmazonBedrockLanguageModel.Config.Service = {}
+      ) =>
+        Effect.gen(function*() {
+          const bodies: Array<any> = []
+          const handler = (request: HttpClientRequest.HttpClientRequest) =>
+            Effect.map(getRequestBody(request), (body) => {
+              bodies.push(body)
+              return objectResponse(
+                request,
+                body.toolConfig === undefined
+                  ? [{ text: "{\"ok\":true}" }]
+                  : [{ toolUse: { toolUseId: "tu_1", name: "result", input: { ok: true } } }]
+              )
+            })
+          const result = yield* LanguageModel.generateObject({
+            prompt: "x",
+            objectName: "result",
+            schema: Schema.Struct({ ok: Schema.Boolean })
+          }).pipe(AmazonBedrockLanguageModel.withConfigOverride(config), Effect.provide(layersFor(handler, model)))
+          assert.deepStrictEqual(result.value, { ok: true })
+          const [body] = bodies
+          return { system: body.system, outputConfig: body.outputConfig, toolConfig: body.toolConfig }
+        })
+
+      for (
+        const { model, path } of [
+          { model: "eu.anthropic.claude-opus-4-8", path: "native" },
+          { model: "global.anthropic.claude-haiku-4-5-20251001-v1:0", path: "native" },
+          {
+            model: "arn:aws:bedrock:eu-west-1:123456789012:inference-profile/eu.anthropic.claude-opus-4-8",
+            path: "native"
+          },
+          {
+            model: "arn:aws:bedrock:eu-west-1:123456789012:application-inference-profile/a1b2c3d4e5f6",
+            path: "native"
+          },
+          { model: "us.anthropic.claude-3-7-sonnet-20250219-v1:0", path: "the forced tool" },
+          { model: "eu.amazon.nova-pro-v1:0", path: "the forced tool" },
+          { model: "arn:aws:bedrock:eu-west-1::foundation-model/amazon.nova-pro-v1:0", path: "the forced tool" },
+          { model: "mistral.mistral-large-2402-v1:0", path: "the forced tool" },
+          { model: "global.openai.gpt-5.5", path: "the forced tool" },
+          { model: "us.meta.llama4-maverick-17b-instruct-v1:0", path: "the unforced tool" },
+          { model: "meta.llama3-70b-instruct-v1:0", path: "the unforced tool" },
+          { model: "us.writer.palmyra-x5-v1:0", path: "the unforced tool" },
+          {
+            model: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.meta.llama4-maverick-17b-instruct-v1:0",
+            path: "the unforced tool"
+          }
+        ] as const
+      ) {
+        it.effect(`asks ${model} for the object through ${path}`, () =>
+          Effect.gen(function*() {
+            assert.deepStrictEqual(yield* generate(model), paths[path])
+          }))
+      }
+
+      it.effect("lets the config override the path the model ID selects", () =>
+        Effect.gen(function*() {
+          assert.deepStrictEqual(yield* generate("global.openai.gpt-5.5", { structuredOutputs: true }), paths.native)
+          assert.deepStrictEqual(
+            yield* generate("eu.amazon.nova-pro-v1:0", { forcedToolChoice: false }),
+            paths["the unforced tool"]
+          )
+          assert.deepStrictEqual(
+            yield* generate("us.meta.llama4-maverick-17b-instruct-v1:0", { forcedToolChoice: true }),
+            paths["the forced tool"]
+          )
+        }))
+    })
 
     describe("through the object tool", () => {
       const Answer = Schema.Struct({ answer: Schema.Number })
@@ -1477,7 +1578,7 @@ describe("AmazonBedrockLanguageModel", () => {
         // Off on a model detected as supporting it ...
         yield* generate.pipe(
           AmazonBedrockLanguageModel.withConfigOverride({ structuredOutputs: false }),
-          Effect.provide(layersFor(handler))
+          Effect.provide(layersFor(handler, claude))
         )
         // ... and on for one detected as not supporting it.
         yield* generate.pipe(
@@ -1557,7 +1658,7 @@ describe("AmazonBedrockLanguageModel", () => {
           schema: Schema.Struct({ ok: Schema.Boolean }),
           toolkit
         }).pipe(
-          Effect.provide(layersFor(handler)),
+          Effect.provide(layersFor(handler, claude)),
           Effect.provide(toolkit.toLayer({ Lookup: () => Effect.succeed("found") }))
         )
 
