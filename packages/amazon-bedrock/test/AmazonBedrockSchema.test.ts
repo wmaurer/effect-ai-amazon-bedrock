@@ -32,6 +32,18 @@ describe("AmazonBedrockSchema", () => {
       assert.isUndefined(block.toolResult)
     }))
 
+  it.effect("decodes a stop reason outside the known set", () =>
+    Effect.gen(function*() {
+      const decoded = yield* Schema.decodeUnknownEffect(AmazonBedrockSchema.StopReason)("brand_new_reason")
+      assert.strictEqual(decoded, "brand_new_reason")
+    }))
+
+  it.effect("rejects a stop reason that is not a string", () =>
+    Effect.gen(function*() {
+      const error = yield* Schema.decodeUnknownEffect(AmazonBedrockSchema.StopReason)(42).pipe(Effect.flip)
+      assert.strictEqual(error._tag, "SchemaError")
+    }))
+
   it.effect("encodes a ConverseRequest carrying toolConfig", () =>
     Effect.gen(function*() {
       const encoded = yield* Schema.encodeEffect(AmazonBedrockSchema.ConverseRequest)(
