@@ -77,16 +77,6 @@ The live suites cannot settle this as they stand. `BEDROCK_MODEL_ID` changes the
 cache, citation, and reasoning tests check Claude behaviour and would fail on other models for
 that reason alone. Run `probe-models.ts` for the model instead.
 
-## Unknown stop reasons
-
-`StopReason` in `AmazonBedrockSchema.ts` is a closed set of the nine values in the Smithy model,
-and it decodes `ConverseResponse.stopReason` and `MessageStopEvent.stopReason`. If Bedrock adds
-a stop reason, or a model returns one outside the set, the whole response fails to decode,
-including the text that came before it. Decoding an unknown value as a string would keep the
-response. `resolveFinishReason` in `internal/utilities.ts` already gives `"unknown"` for a value
-missing from its map, though Effect's `"other"` (a reason the protocol does not support) fits an
-unrecognised stop reason better.
-
 ## Embeddings
 
 `effect/ai` defines an `EmbeddingModel` interface, and this package implements only
