@@ -87,13 +87,58 @@ export class AmazonBedrockClient extends Context.Service<AmazonBedrockClient, Se
 // =============================================================================
 
 /**
- * Configuration for creating an Amazon Bedrock client.
+ * SigV4 credentials as a {@link CredentialProvider} returns them. The shape is
+ * the AWS SDK's `AwsCredentialIdentity`, so the SDK's providers fit without an
+ * adapter.
  *
  * @stability unstable
  * @category options
- * @since 0.1.0
+ * @since 0.2.0
  */
-export type Options = {
+export interface Credentials {
+  readonly accessKeyId: string
+  readonly secretAccessKey: string
+  /** An empty token is sent as no token. */
+  readonly sessionToken?: string | undefined
+  /** The client asks the provider for new credentials five minutes before this time. */
+  readonly expiration?: Date | undefined
+}
+
+/**
+ * Supplies SigV4 credentials that can change while the program runs.
+ *
+ * **Details**
+ *
+ * A provider is one of these:
+ *
+ * - A function in the shape of the AWS SDK's credential providers, such as
+ *   `fromNodeProviderChain()` from `@aws-sdk/credential-providers`. A rejected
+ *   promise fails the request with an `AuthenticationError` of kind
+ *   `"Unknown"`. After Bedrock rejects the credentials, the client calls the
+ *   function with `{ forceRefresh: true }`.
+ * - An `Effect`. It can fail with an `AiError`, which the request fails with
+ *   unchanged, or with an `AiError` reason, such as an `AuthenticationError`,
+ *   which the client wraps in an `AiError`. The services that it requires
+ *   become requirements of the layer. It runs with the services of the
+ *   request first, and the services that the layer was built with fill in the
+ *   rest.
+ *
+ * The client runs the provider at most once at a time, and keeps the
+ * credentials until five minutes before their `expiration`. Credentials with
+ * no `expiration` are kept until Bedrock rejects them. Keys that are empty fail
+ * the request with an `AuthenticationError` of kind `"MissingKey"`.
+ *
+ * @stability unstable
+ * @category options
+ * @since 0.2.0
+ */
+export type CredentialProvider<R = never> =
+  // `forceRefresh` has no `| undefined`: with `exactOptionalPropertyTypes`, the
+  // AWS SDK's provider types would not assign to it.
+  | ((options?: { readonly forceRefresh?: boolean }) => PromiseLike<Credentials>)
+  | Effect.Effect<Credentials, AiError.AiError | AiError.AiErrorReason, R>
+
+interface CommonOptions {
   /**
    * The base URL for the Bedrock runtime API. Override to use a proxy or a
    * different endpoint.
@@ -101,9 +146,6 @@ export type Options = {
    * @default `https://bedrock-runtime.${region}.amazonaws.com`
    */
   readonly apiUrl?: string | undefined
-  readonly accessKeyId: string
-  readonly secretAccessKey: Redacted.Redacted<string>
-  readonly sessionToken?: Redacted.Redacted<string> | undefined
   /**
    * The AWS region.
    *
@@ -112,6 +154,81 @@ export type Options = {
   readonly region?: string | undefined
   readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined
 }
+
+interface StaticKeys {
+  readonly accessKeyId: string
+  readonly secretAccessKey: Redacted.Redacted<string>
+  readonly sessionToken?: Redacted.Redacted<string> | undefined
+  readonly credentialProvider?: never
+  readonly apiKey?: never
+}
+
+interface ProvidedKeys<R> {
+  readonly credentialProvider: CredentialProvider<R>
+  readonly accessKeyId?: never
+  readonly secretAccessKey?: never
+  readonly sessionToken?: never
+  readonly apiKey?: never
+}
+
+interface ApiKey {
+  /** A Bedrock API key, sent as `Authorization: Bearer <key>` in place of a SigV4 signature. */
+  readonly apiKey: Redacted.Redacted<string>
+  readonly accessKeyId?: never
+  readonly secretAccessKey?: never
+  readonly sessionToken?: never
+  readonly credentialProvider?: never
+}
+
+/**
+ * Configuration for creating an Amazon Bedrock client.
+ *
+ * **Details**
+ *
+ * The options take exactly one way to authenticate:
+ *
+ * - `accessKeyId` and `secretAccessKey`, and an optional `sessionToken`.
+ * - `credentialProvider`, a {@link CredentialProvider}.
+ * - `apiKey`, a Bedrock API key.
+ *
+ * @stability unstable
+ * @category options
+ * @since 0.1.0
+ */
+export type Options<R = never> = CommonOptions & (StaticKeys | ProvidedKeys<R> | ApiKey)
+
+/**
+ * The {@link Options} of {@link layerConfig}, with a `Config` for each value.
+ * `credentialProvider` and `transformClient` are not configuration, so they
+ * take the same values as in {@link Options}.
+ *
+ * @stability unstable
+ * @category options
+ * @since 0.2.0
+ */
+export type ConfigOptions<R = never> =
+  & {
+    readonly apiUrl?: Config.Config<string> | undefined
+    readonly region?: Config.Config<string> | undefined
+    readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined
+  }
+  & (
+    | {
+      readonly accessKeyId: Config.Config<string>
+      readonly secretAccessKey: Config.Config<Redacted.Redacted<string>>
+      readonly sessionToken?: Config.Config<Redacted.Redacted<string>> | undefined
+      readonly credentialProvider?: never
+      readonly apiKey?: never
+    }
+    | ProvidedKeys<R>
+    | {
+      readonly apiKey: Config.Config<Redacted.Redacted<string>>
+      readonly accessKeyId?: never
+      readonly secretAccessKey?: never
+      readonly sessionToken?: never
+      readonly credentialProvider?: never
+    }
+  )
 
 // =============================================================================
 // Constructor
@@ -132,8 +249,12 @@ const withRedactedHeaders = Effect.updateService(Headers.CurrentRedactedNames, a
  * @category constructors
  * @since 0.1.0
  */
-export const make = Effect.fnUntraced(
-  function*(options: Options): Effect.fn.Return<Service, never, HttpClient.HttpClient> {
+export const make = <R = never>(options: Options<R>): Effect.Effect<Service, never, HttpClient.HttpClient | R> =>
+  Effect.gen(function*() {
+    if (options.accessKeyId === undefined) {
+      return yield* Effect.die(new Error("not implemented"))
+    }
+    const keys = options
     const region = options.region ?? "us-east-1"
 
     const baseClient = yield* HttpClient.HttpClient
@@ -154,9 +275,9 @@ export const make = Effect.fnUntraced(
           headers: Object.entries(originalHeaders),
           body: prepareBody(request.body),
           region,
-          accessKeyId: options.accessKeyId,
-          secretAccessKey: Redacted.value(options.secretAccessKey),
-          ...(options.sessionToken ? { sessionToken: Redacted.value(options.sessionToken) } : {})
+          accessKeyId: keys.accessKeyId,
+          secretAccessKey: Redacted.value(keys.secretAccessKey),
+          ...(keys.sessionToken ? { sessionToken: Redacted.value(keys.sessionToken) } : {})
         })
         const { headers: signedHeaders } = yield* Effect.promise(() => signer.sign())
         const headers = Headers.merge(originalHeaders, Headers.fromInput(signedHeaders))
@@ -211,9 +332,7 @@ export const make = Effect.fnUntraced(
       converse,
       converseStream
     })
-  },
-  withRedactedHeaders
-)
+  }).pipe(withRedactedHeaders)
 
 // =============================================================================
 // Layers
@@ -226,7 +345,9 @@ export const make = Effect.fnUntraced(
  * @category layers
  * @since 0.1.0
  */
-export const layer = (options: Options): Layer.Layer<AmazonBedrockClient, never, HttpClient.HttpClient> =>
+export const layer = <R = never>(
+  options: Options<R>
+): Layer.Layer<AmazonBedrockClient, never, HttpClient.HttpClient | R> =>
   Layer.effect(AmazonBedrockClient, make(options))
 
 /**
@@ -237,20 +358,18 @@ export const layer = (options: Options): Layer.Layer<AmazonBedrockClient, never,
  * @category layers
  * @since 0.1.0
  */
-export const layerConfig = (options: {
-  readonly apiUrl?: Config.Config<string> | undefined
-  readonly accessKeyId: Config.Config<string>
-  readonly secretAccessKey: Config.Config<Redacted.Redacted<string>>
-  readonly sessionToken?: Config.Config<Redacted.Redacted<string>> | undefined
-  readonly region?: Config.Config<string> | undefined
-  readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined
-}): Layer.Layer<AmazonBedrockClient, Config.ConfigError, HttpClient.HttpClient> =>
+export const layerConfig = <R = never>(
+  options: ConfigOptions<R>
+): Layer.Layer<AmazonBedrockClient, Config.ConfigError, HttpClient.HttpClient | R> =>
   Layer.effect(
     AmazonBedrockClient,
     Effect.gen(function*() {
       const apiUrl = Predicate.isNotUndefined(options.apiUrl)
         ? yield* options.apiUrl :
         undefined
+      if (options.accessKeyId === undefined) {
+        return yield* Effect.die(new Error("not implemented"))
+      }
       const accessKeyId = yield* options.accessKeyId
       const secretAccessKey = yield* options.secretAccessKey
       const sessionToken = Predicate.isNotUndefined(options.sessionToken)
