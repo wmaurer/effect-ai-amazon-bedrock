@@ -121,6 +121,10 @@ const RedactedAmazonBedrockHeaders = {
   AmzSecurityToken: "X-Amz-Security-Token"
 }
 
+const appendRedactedHeaders = Array.appendAll(Object.values(RedactedAmazonBedrockHeaders))
+
+const withRedactedHeaders = Effect.updateService(Headers.CurrentRedactedNames, appendRedactedHeaders)
+
 /**
  * Creates an Amazon Bedrock client service with the given options.
  *
@@ -178,7 +182,8 @@ export const make = Effect.fnUntraced(
           Effect.catchTags({
             HttpClientError: (error) => Errors.mapHttpClientError(error, "converse"),
             SchemaError: (error) => Effect.fail(Errors.mapSchemaError(error, "converse"))
-          })
+          }),
+          withRedactedHeaders
         )
       })
 
@@ -196,7 +201,8 @@ export const make = Effect.fnUntraced(
               HttpClientError: (error) => Stream.fromEffect(Errors.mapHttpClientError(error, "converseStream")),
               SchemaError: (error) => Stream.fail(Errors.mapSchemaError(error, "converseStream")),
               EventStreamError: (error) => Stream.fail(Errors.mapEventStreamError(error, "converseStream"))
-            })
+            }),
+            Stream.updateService(Headers.CurrentRedactedNames, appendRedactedHeaders)
           ))
       )
     }
@@ -206,10 +212,7 @@ export const make = Effect.fnUntraced(
       converseStream
     })
   },
-  Effect.updateService(
-    Headers.CurrentRedactedNames,
-    Array.appendAll(Object.values(RedactedAmazonBedrockHeaders))
-  )
+  withRedactedHeaders
 )
 
 // =============================================================================

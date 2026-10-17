@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { AmazonBedrockClient, AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
 import { Effect, Layer, Redacted, Schema, Stream } from "effect"
-import { LanguageModel, Prompt, Tool, Toolkit } from "effect/ai"
+import { type AiError, LanguageModel, Prompt, Tool, Toolkit } from "effect/ai"
 import { HttpClient, type HttpClientError, type HttpClientRequest, HttpClientResponse } from "effect/http"
 import { concat, eventFrame, exceptionFrame, happyPathFrames } from "./utils.ts"
 
@@ -2114,6 +2114,47 @@ describe("AmazonBedrockLanguageModel", () => {
           end: 140,
           source: null
         })
+      }))
+  })
+  describe("session token", () => {
+    const sessionToken = "FAKE-SESSION-TOKEN-0123"
+    const layer = AmazonBedrockLanguageModel.layer({ model: "us.test.model-v1:0" }).pipe(
+      Layer.provide(AmazonBedrockClient.layer({
+        accessKeyId: "AKIA_TEST",
+        secretAccessKey: Redacted.make("test-secret"),
+        sessionToken: Redacted.make(sessionToken),
+        region: "us-east-1"
+      })),
+      Layer.provide(Layer.succeed(
+        HttpClient.HttpClient,
+        makeHttpClient((request) =>
+          Effect.succeed(jsonResponse(request, { message: "Forbidden" }, 403, {
+            "x-amz-security-token": sessionToken
+          }))
+        )
+      ))
+    )
+
+    const tokenHeaders = (error: AiError.AiError) => {
+      const http = error.reason._tag === "AuthenticationError" ? error.reason.http : undefined
+      return [
+        String(http?.request.headers["x-amz-security-token"]),
+        String(http?.response?.headers["x-amz-security-token"])
+      ]
+    }
+
+    it.effect("is redacted in the request and response headers of a generateText error", () =>
+      Effect.gen(function*() {
+        const error = yield* Effect.flip(LanguageModel.generateText({ prompt: "Hello" }).pipe(Effect.provide(layer)))
+        assert.deepStrictEqual(tokenHeaders(error), ["<redacted>", "<redacted>"])
+      }))
+
+    it.effect("is redacted in the request and response headers of a streamText error", () =>
+      Effect.gen(function*() {
+        const error = yield* Effect.flip(
+          LanguageModel.streamText({ prompt: "Hello" }).pipe(Stream.runDrain, Effect.provide(layer))
+        )
+        assert.deepStrictEqual(tokenHeaders(error), ["<redacted>", "<redacted>"])
       }))
   })
   describe("additionalModelRequestFields", () => {
