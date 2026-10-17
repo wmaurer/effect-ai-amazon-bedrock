@@ -14,7 +14,7 @@ The package started as `packages/ai/amazon-bedrock` in a fork of `effect-ts/effe
 
 `src/index.ts` comes from the `effect-utils codegen` command of the Effect monorepo, which this repository does not have. When you add a module, add an export block in the same form as the others, a JSDoc comment with `@stability unstable` and `@since`, and an `export * as` line. The new module's own JSDoc and each of its exports need a `@stability` tag too, because the fork's `tsc` and its JSDoc check require one. The `barrel` step of `scripts/upstream-check.sh` runs the codegen and fails if its output differs from the file.
 
-`docs/TODO.md` lists the Converse capabilities the provider does not model yet. Read it before you add one. `docs/design/` holds the design records for earlier features, and `docs/changesets/` holds the changeset entries an upstream pull request needs. They are copied verbatim from the Effect fork, so oxlint and dprint skip `docs/`.
+`docs/TODO.md` lists the Converse capabilities the provider does not model yet. Read it before you add one. `docs/design/` holds the design records for earlier features. They are copied verbatim from the Effect fork, so oxlint and dprint skip `docs/`.
 
 ## Tooling
 
