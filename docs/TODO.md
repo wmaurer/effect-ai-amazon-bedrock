@@ -50,8 +50,11 @@ paths. `getModelCapabilities` follows what the probe saw for `generateObject`, a
 - gpt-oss-120b accepts `outputConfig.textFormat`, but wrote text before the JSON in 3 of 4
   runs. DeepSeek V3.2 and Mistral Large 3 accepted it in `us-east-1`. The provider sends neither
   of them `outputConfig.textFormat`, and a caller can set `structuredOutputs: true`.
-- The unforced tool on Llama 3.1 70B and Llama 3.3 70B returned an object that does not match
-  the schema.
+- The unforced tool on Llama 3.3 70B returned an object that does not match the schema in both
+  runs, and on Llama 3.1 70B in 1 of 2 runs.
+- Some results vary between runs. The forced tool on gpt-oss-20b failed in 1 of 8 runs with
+  `No text content in response`, and MiniMax M2 made no tool call in `streamText` in 1 of 2
+  runs. The probe did not keep those raw responses.
 - vercel-ai's `normalize-tool-call-id.ts` says that Mistral models need tool call IDs that match
   `^[a-zA-Z0-9]{9}$`, and rewrites the `tooluse_...` IDs that Bedrock generates. The provider
   sends the IDs unchanged. The probe made one tool call per request and sent no tool result
