@@ -6,23 +6,19 @@ Ordered by how likely they are to matter.
 
 ## Credentials
 
-`AmazonBedrockClient.layer` and `layerConfig` take one fixed access key id, secret access key, and
-optional session token (`AmazonBedrockClient.ts`). Nothing else supplies credentials:
+`AmazonBedrockClient` takes fixed keys, a `credentialProvider`, or a Bedrock `apiKey`
+(`AmazonBedrockClient.ts`, `internal/credentials.ts`). These gaps remain:
 
-- There is no AWS credential chain. Shared config and credential files (`~/.aws`), profiles, IAM
-  Identity Center, ECS and EKS container credentials, and EC2 instance metadata are not read.
-  A service on ECS or EKS gets its role's credentials only from the container credentials
-  endpoint, so it cannot use this provider without code of its own that copies them into the
-  layer.
-- Temporary credentials are never refreshed. The layer reads them once, so a long-running
-  process fails with `ExpiredTokenException` when the session ends.
-- Bedrock API keys are not supported. They are sent as `Authorization: Bearer <key>` in place of
-  a SigV4 signature. The AI SDK's provider takes them through an `apiKey` option or the
-  `AWS_BEARER_TOKEN_BEDROCK` environment variable, and takes refreshable credentials through a
-  `credentialProvider` function (`packages/amazon-bedrock/src/amazon-bedrock-provider.ts` in
-  `vercel/ai`). That is the prior art for both.
+- No live run has used a credential provider or an API key yet. The unit tests stub the
+  `HttpClient`. Step 5 of the design's implementation plan is that live check.
+- The client reads no AWS credential chain of its own. A program passes `fromNodeProviderChain()`
+  from `@aws-sdk/credential-providers`, or another provider, to `credentialProvider`.
+- The client does not read `AWS_BEARER_TOKEN_BEDROCK` implicitly, as the AI SDK's provider and
+  the AWS SDK for JavaScript do. A program reads it with `Config.Redacted`.
+- A request that Bedrock rejects with `ExpiredTokenException` fails, and only the next request
+  gets new credentials. Refreshing five minutes before `expiration` makes that case rare.
 
-The design and implementation plan for 0.2.0 are in
+The design and the reasons for these choices are in
 `docs/design/2026-10-17-bedrock-credentials-design.md`.
 
 ## Models from other providers

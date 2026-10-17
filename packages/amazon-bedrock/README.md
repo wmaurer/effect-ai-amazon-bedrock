@@ -138,20 +138,86 @@ To run the program, do these steps:
 
 `AmazonBedrockClient` needs an `HttpClient`. The example above uses `FetchHttpClient.layer` from `effect/http`.
 
-The client takes explicit credentials. It does not read `~/.aws`, the AWS profile variables, or instance metadata. Give the credentials in one of two ways:
+The client authenticates each request in one of three ways:
 
-- `AmazonBedrockClient.layerConfig` reads each option from a `Config`, as in the example above.
-- `AmazonBedrockClient.layer` takes plain values. Pass `secretAccessKey` and `sessionToken` as `Redacted` values.
+- Fixed keys. `accessKeyId`, `secretAccessKey`, and an optional `sessionToken`. The client signs each request with SigV4.
+- A credential provider. `credentialProvider` is a function or an `Effect` that returns credentials. The client signs each request with SigV4 and asks the provider for new credentials before the old ones expire.
+- A Bedrock API key. `apiKey` is sent as `Authorization: Bearer <key>` in place of a SigV4 signature.
 
-`sessionToken` is optional, but `layerConfig` fails with a `ConfigError` if a `Config` that you give it finds no value. For that reason the example above gives `AWS_SESSION_TOKEN` an empty default with `Config.withDefault`. The client sends no session token when the token is empty, so the same program runs with temporary and long-lived keys.
+Give exactly one of them. Options that mix two ways, or give none, do not compile. `AmazonBedrockClient.layerConfig` reads each value from a `Config`. `AmazonBedrockClient.layer` takes plain values, with the secrets as `Redacted` values. The client reads no environment variable and no file by itself.
 
-The client reads the credentials once, when the layer is built, and uses them for every request. Where you get them depends on where the program runs:
+### Use fixed keys
 
-- On a machine where the AWS CLI signs in through a profile or IAM Identity Center, run `eval "$(aws configure export-credentials --format env)"` in the shell before you start the program. The command needs AWS CLI version 2. It prints the profile's access key ID, secret access key, and session token, if the profile has one, as `export` lines. Add `--profile <name>` to choose a profile.
-- AWS Lambda sets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` for the function's execution role, so the example above runs without changes.
-- On Amazon ECS, Amazon EKS, and Amazon EC2, the role's credentials are not in the environment. Get them yourself, for example with `fromNodeProviderChain()` from `@aws-sdk/credential-providers`, and pass them to `AmazonBedrockClient.layer`.
+The example above reads fixed keys from the environment. `sessionToken` is optional, but `layerConfig` fails with a `ConfigError` if a `Config` that you give it finds no value. For that reason the example gives `AWS_SESSION_TOKEN` an empty default with `Config.withDefault`. The client sends no session token when the token is empty, so the same program runs with temporary and long-lived keys. AWS Lambda sets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` for the function's execution role, so the example runs there without changes.
 
-The client does not refresh temporary credentials. When the session ends, every request fails with an `AuthenticationError` of kind `ExpiredKey`. Restart the program with new credentials.
+The client reads fixed keys once, when the layer is built. When temporary keys expire, every request fails with an `AuthenticationError` of kind `ExpiredKey`. A program that runs longer than its session needs a credential provider.
+
+### Use a credential provider
+
+A function in the shape of the AWS SDK's credential providers fits `credentialProvider` without an adapter. `fromNodeProviderChain()` from `@aws-sdk/credential-providers` looks for credentials where the AWS CLI does, in the environment, in the profiles and IAM Identity Center sessions of `~/.aws`, and in the container credentials of Amazon ECS and Amazon EKS and the instance metadata of Amazon EC2. This package does not depend on the AWS SDK, so install `@aws-sdk/credential-providers` yourself.
+
+```ts
+import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
+import { AmazonBedrockClient } from "@wmaurer/effect-ai-amazon-bedrock"
+import { Layer } from "effect"
+import { FetchHttpClient } from "effect/http"
+
+const BedrockClient = AmazonBedrockClient.layer({
+  region: "eu-west-1",
+  credentialProvider: fromNodeProviderChain()
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+The client runs the provider when a request needs credentials, and runs it once for requests that need them at the same time:
+
+- It keeps the credentials until five minutes before their `expiration`. It keeps credentials that expire in less than five minutes for 10 seconds, and credentials without an `expiration` until Bedrock rejects them.
+- If the provider fails while the last credentials have not expired, the client signs with the last credentials. It asks the provider again after 30 seconds, or when the last credentials expire if that is sooner.
+- If Bedrock rejects the credentials with an `AuthenticationError` of kind `ExpiredKey`, `InvalidKey`, or `MissingKey`, the request fails, and the next request gets new credentials. The client calls a function provider with `{ forceRefresh: true }` for them. Kind `InsufficientPermissions` keeps the credentials, because new credentials for the same role have the same IAM policy.
+- If the promise of a function provider rejects, the request fails with an `AuthenticationError` of kind `Unknown`. If the provider returns an empty access key ID or secret access key, the request fails with an `AuthenticationError` of kind `MissingKey`.
+
+An `Effect` provider can load credentials from a service of your own. The layer then requires that service:
+
+```ts
+import { AmazonBedrockClient } from "@wmaurer/effect-ai-amazon-bedrock"
+import { Context, Effect } from "effect"
+import type { AiError } from "effect/ai"
+
+class Vault extends Context.Service<Vault, {
+  readonly bedrockCredentials: Effect.Effect<AmazonBedrockClient.Credentials, AiError.AiError>
+}>()("Vault") {}
+
+// Layer<AmazonBedrockClient, never, HttpClient | Vault>
+export const BedrockClient = AmazonBedrockClient.layer({
+  region: "eu-west-1",
+  credentialProvider: Effect.gen(function*() {
+    const vault = yield* Vault
+    return yield* vault.bedrockCredentials
+  })
+})
+```
+
+The provider runs with the services of the request first, and the services that the layer was built with fill in the rest. A span that the provider opens is a child of the span of the request that runs the provider.
+
+The `Effect` can fail with an `AiError`, which the request fails with unchanged, or with an `AiError` reason such as an `AuthenticationError`, which the client puts in an `AiError`.
+
+A retry policy in `transformClient` does not retry a failed provider, because the client gets the credentials before it sends the request. Each retry of a request signs again with the credentials of the first attempt.
+
+### Use a Bedrock API key
+
+```ts
+import { AmazonBedrockClient } from "@wmaurer/effect-ai-amazon-bedrock"
+import { Config, Layer } from "effect"
+import { FetchHttpClient } from "effect/http"
+
+const BedrockClient = AmazonBedrockClient.layerConfig({
+  region: Config.String("AWS_REGION"),
+  apiKey: Config.Redacted("AWS_BEARER_TOKEN_BEDROCK")
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+`AWS_BEARER_TOKEN_BEDROCK` is the variable that the AWS SDK for JavaScript reads the key from. The client reads it only through the `Config` that you give it. An `AiError` and an HTTP span that records headers show the `authorization` header as `<redacted>`.
+
+### Set the other options
 
 The other options are these:
 
