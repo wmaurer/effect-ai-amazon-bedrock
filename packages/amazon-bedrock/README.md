@@ -6,22 +6,70 @@ The package supports text generation, streaming, tool calls, structured output, 
 
 ## Install the package
 
-The package declares `effect` `^4.0.5` as a peer dependency. Its tests run on `effect` 4.0.5.
-
 ```sh
 pnpm add @wmaurer/effect-ai-amazon-bedrock effect
 ```
 
-The package's types need `exactOptionalPropertyTypes` or `skipLibCheck` in your `tsconfig.json`. Without either option, `tsc` reports error TS2411 on the `amazonBedrock` option types. Effect's own AI providers at 4.0.5, such as `@effect/ai-anthropic` and `@effect/ai-openai`, need the same setting. A project that already uses one of those providers already has it.
+The package declares `effect` `^4.0.5` as a peer dependency. Its tests run on `effect` 4.0.5.
 
-If you link the package source through a pnpm workspace or `pnpm link`, its imports resolve to `.ts` files. TypeScript 7 then reports TS2411 even with `skipLibCheck`, so set `exactOptionalPropertyTypes`.
+Set these options in your `tsconfig.json`:
 
-A linked package and your project must also load the same copy of `effect`. With two copies, the client cannot read a `Redacted` value that the other copy made, and it fails with `Error: Unable to get redacted value` before it sends a request. To load one copy, add an override to your `pnpm-workspace.yaml` that points `effect` at the copy in the package's checkout, and run `pnpm install`. Replace `<checkout>` with the absolute path of your clone of this repository.
-
-```yaml
-overrides:
-  effect: link:<checkout>/packages/amazon-bedrock/node_modules/effect
+```json
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "exactOptionalPropertyTypes": true
+  }
+}
 ```
+
+Effect's declaration files use `AsyncDisposable` and `Symbol.asyncDispose`, which the default library of TypeScript 6.0 and 7 does not declare. Without `"target": "esnext"`, `tsc` reports errors TS2304 and TS2550 in those files. Without `exactOptionalPropertyTypes`, `tsc` reports error TS2411 on the `amazonBedrock` option types. Effect's own AI providers at 4.0.5, such as `@effect/ai-anthropic` and `@effect/ai-openai`, need the same option, so a project that uses one of them has it already. `skipLibCheck` hides all of these errors and can replace both options.
+
+The options work with TypeScript 6.0 and later. TypeScript 5.9 also needs `"strict": true` and `"module": "nodenext"`.
+
+### Link the source to use unreleased changes
+
+To use a change that is not on npm yet, link the package source from a clone of this repository. The steps need pnpm 10.5.1 or later, because they put a pnpm override in `pnpm-workspace.yaml`. Earlier versions ignore the override or reject the file. Replace `<checkout>` with the absolute path of the clone.
+
+1. Clone the repository and run `pnpm install` in the clone. The install creates `<checkout>/packages/amazon-bedrock/node_modules/effect`, which the next step needs.
+
+   ```sh
+   git clone https://github.com/wmaurer/effect-ai-amazon-bedrock.git <checkout>
+   cd <checkout>
+   pnpm install
+   ```
+
+2. In your project, add an override to `pnpm-workspace.yaml` that points `effect` at the copy in the clone.
+
+   ```yaml
+   overrides:
+     effect: link:<checkout>/packages/amazon-bedrock/node_modules/effect
+   ```
+
+   The linked package and your project must load the same copy of `effect`. With two copies, the client cannot read a `Redacted` value that the other copy made, and it fails with `Error: Unable to get redacted value` before it sends a request.
+
+3. Add the linked package and `effect` to your project.
+
+   ```sh
+   pnpm add link:<checkout>/packages/amazon-bedrock effect
+   ```
+
+   Because of the override, pnpm records `effect` in your `package.json` as a `link:` path and not as a version range.
+
+4. Set these options in your `tsconfig.json`.
+
+   ```json
+   {
+     "compilerOptions": {
+       "target": "esnext",
+       "exactOptionalPropertyTypes": true,
+       "allowImportingTsExtensions": true,
+       "noEmit": true
+     }
+   }
+   ```
+
+   The linked package's imports resolve to its `.ts` source files. TypeScript 7 reports TS2411 on that source even with `skipLibCheck`, so set `exactOptionalPropertyTypes`. The source imports its own modules with a `.ts` extension, so without `allowImportingTsExtensions`, `tsc` reports error TS5097. `tsc` accepts `allowImportingTsExtensions` only with `noEmit`, `emitDeclarationOnly`, or `rewriteRelativeImportExtensions`, and reports error TS5096 without one of them. Set `target` for the reason that [Install the package](#install-the-package) gives. TypeScript 5.9 needs the same two extra options as there.
 
 ## Generate text
 
@@ -56,7 +104,35 @@ program.pipe(
 )
 ```
 
-Run it with `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION=eu-west-1` set. If you use temporary credentials, such as the result of `aws sts assume-role`, also set `AWS_SESSION_TOKEN`. Bedrock rejects a temporary key without its session token.
+To run the program, do these steps:
+
+1. Create a project whose `package.json` sets `"type": "module"`, and install the package.
+
+   ```sh
+   mkdir bedrock-example
+   cd bedrock-example
+   pnpm init --init-type module
+   pnpm add @wmaurer/effect-ai-amazon-bedrock effect
+   ```
+
+   Without a `type` field, Node still runs `main.ts` as an ES module, but it first prints the warning `MODULE_TYPELESS_PACKAGE_JSON`.
+
+2. Save the program as `main.ts` in the project.
+
+3. Set your AWS credentials in the environment.
+
+   ```sh
+   export AWS_ACCESS_KEY_ID=<access key ID>
+   export AWS_SECRET_ACCESS_KEY=<secret access key>
+   ```
+
+   If you use temporary credentials, such as the result of `aws sts assume-role`, also set `AWS_SESSION_TOKEN`. Bedrock rejects a temporary key without its session token. If either variable is missing, Node stops with an `UnhandledPromiseRejection` whose reason is `"[object Object]"`, and the message does not name the variable.
+
+4. Run the program with Node 22.18 or a later 22 release, or with Node 23.6 or later. These versions run a TypeScript file without a build step.
+
+   ```sh
+   AWS_REGION=eu-west-1 node main.ts
+   ```
 
 ## Configure the client
 

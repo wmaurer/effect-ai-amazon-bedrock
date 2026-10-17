@@ -1,6 +1,6 @@
 {
   "name": "@wmaurer/effect-ai-amazon-bedrock",
-  "version": "4.0.1",
+  "version": "0.1.0",
   "type": "module",
   "license": "MIT",
   "author": "Wayne Maurer",
@@ -46,11 +46,11 @@
     "dist/**/*.js",
     "dist/**/*.js.map",
     "dist/**/*.d.ts",
-    "dist/**/*.d.ts.map"
+    "dist/**/*.d.ts.map",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
     "access": "public",
-    "provenance": true,
     "exports": {
       "./package.json": "./package.json",
       ".": "./dist/index.js",
@@ -63,7 +63,8 @@
   "scripts": {
     "build": "tsc -b tsconfig.json && pnpm babel",
     "babel": "babel dist --plugins annotate-pure-calls --out-dir dist --source-maps",
-    "check": "tsc -b tsconfig.json"
+    "check": "tsc -b tsconfig.json",
+    "prepublishOnly": "node -e \"for (const path of ['dist', 'tsconfig.tsbuildinfo']) fs.rmSync(path, { recursive: true, force: true })\" && pnpm build"
   },
   "dependencies": {
     "aws4fetch": "^1.0.20"

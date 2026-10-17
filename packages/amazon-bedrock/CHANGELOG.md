@@ -2,7 +2,7 @@
 
 ## 0.1.0
 
-The first release under this name. The entries come from the changesets in `docs/changesets/`, which an upstream pull request to Effect would reuse.
+The first release under this name. The entries summarize the changesets in `docs/changesets/`, which an upstream pull request to Effect would reuse. Two entries differ from them. The entry on `x-amzn-errortype` has no changeset yet, and the entry on the AWS error message covers a 401 as well as the 403 that its changeset names.
 
 ### Minor Changes
 
@@ -21,6 +21,8 @@ The first release under this name. The entries come from the changesets in `docs
 ### Patch Changes
 
 - Add `additionalModelRequestFields` to the request config, so `withConfigOverride` can pass model-specific fields such as the `thinking` block that turns on extended thinking.
-- Keep the AWS error message on a 403 response. The `InsufficientPermissions` error now carries that message, which tells wrong credentials apart from a model that the account cannot use.
+- Keep the AWS error message in the `AuthenticationError` of a 401 or 403 response. The message tells wrong credentials apart from a model that the account cannot use.
+- Set the `kind` of the `AuthenticationError` from the AWS exception name in the `x-amzn-errortype` header of a 401 or 403 response. `AccessDeniedException` gives `InsufficientPermissions`, and `ExpiredTokenException` gives `ExpiredKey`. `UnrecognizedClientException`, `InvalidSignatureException`, and `IncompleteSignatureException` give `InvalidKey`, and `MissingAuthenticationTokenException` gives `MissingKey`. Without the header, or with another name, a 401 gives `InvalidKey` and a 403 gives `InsufficientPermissions`.
 - Encode `CachePointBlock.ttl` with `Schema.optionalKey`, so the `amazonBedrock` provider options satisfy `Schema.Json`.
 - Fail `generateText` and `streamText` with `InvalidUserInputError`, before the request is sent, when the prompt holds tool calls or tool results and the request carries no `toolConfig`. Converse answers such a request with a 400. The error names the workaround: pass the toolkit that produced the tool calls, with `toolChoice: "auto"`.
+- Redact the `X-Amz-Security-Token` header in the request and response headers of an `AiError` and in an HTTP span that records headers. `converse` and `converseStream` add the header to the names in `Headers.CurrentRedactedNames`, so the names that you set stay redacted too. An error from a request signed with temporary credentials does not show the session token.

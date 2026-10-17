@@ -113,4 +113,30 @@ FORK_REPO=<effect checkout> bash scripts/upstream-check.sh . <log dir>
 
 `scripts/upstream-check.sh` checks the copied tooling files against the Effect fork. Then it copies `packages/amazon-bedrock/src` and `test` into a throwaway worktree of the fork at `<log dir>/fork-wt`. It runs `dprint check` on each file that names `@wmaurer/effect-ai-amazon-bedrock`, reverses the rename, and runs `dprint fmt` on the file to restore the import order. Then it runs the fork's oxlint, dprint, `tsc`, JSDoc, vitest, doctest, cycle, and codegen steps on the package. The fork's `tsconfig.base.json` keeps Effect diagnostics out of the `tsc` exit code, so the `tsc-src` and `tsc-test` steps fail when their log holds any diagnostic line, as `pnpm check` must print none here. The `jsdocs` step runs the fork's `effect-jsdocs --check`, which reads the whole fork. A finding in the package fails the step. The fork branch has findings of its own outside the package, in `packages/effect/src/ai/Prompt.ts` from fork commit `c7e0817fae`, so the tool exits nonzero there. The step then passes only when the output is the tool's completed report and every finding is outside the package, and the summary counts those findings as informational. Any other output, and an exit from a signal, fails the step. Vitest runs twice. The second run matches the fork's CI test job, with `EFFECT_INTEGRATION_TESTS=1` and every `AWS_*` variable unset, so the live suites load and skip. The last line of the output is `UPSTREAM-READY` only when the check runs every step and each one passes. The last line is `NOT-READY` when a step fails, when the check stops early, and when a signal such as SIGINT, SIGTERM, or SIGHUP ends it. SIGKILL ends the check before it can print a verdict, so a summary with no verdict line counts as not ready. The check refuses to start if `<log dir>/fork-wt` exists, and it removes only the worktree that it created. The `src-diff` and `test-diff` steps only report how the package differs from the fork, and they do not change the result. The check runs only part of the fork's CI. It skips `deno check`, `pnpm test-types`, `pnpm ai-docgen`, `pnpm build`, `pnpm check-dist-types`, the bundle job, and the Deno and Bun test runs. The fork's doctest finds no examples in this package, so the `doctest` step passes without running a test. `FORK_REPO` must point at a git checkout of `effect-ts/effect` that has the fork commit. `FORK_REF` selects another commit.
 
-A published npm version can never be reused, even after an unpublish. Publish only when the user asks.
+## Release a version
+
+Only the operator publishes. Never run `pnpm publish` without `--dry-run`, and never run `npm login`. npm never accepts a published version again, even after an unpublish, so a wrong publish uses up its version number.
+
+To prepare a release, do these steps on `main`:
+
+1. Set `version` in `packages/amazon-bedrock/package.json`, and add the version's entry to `packages/amazon-bedrock/CHANGELOG.md`.
+2. Run `pnpm install`. After a `package.json` change, the `verifyDepsBeforeRun` setting in `pnpm-workspace.yaml` makes every `pnpm` script fail with `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` until the install runs.
+3. Run `bash scripts/smoke-consumer.sh`. It must exit 0.
+4. Run `pnpm publish --dry-run --no-git-checks` in `packages/amazon-bedrock`, and check that it names the new version. The dry run does not print the access level. `publishConfig.access` in `package.json` sets it to `public`.
+5. Commit the changed files, and push `main` to `origin`.
+6. Run `git status`, and check that it shows no changed and no untracked files.
+
+`scripts/smoke-consumer.sh` runs the package's `prepublishOnly` script, which builds `dist/` from scratch as a publish does. It packs the package outside `packages/amazon-bedrock` and installs the tarball and `effect@4.0.5` in a new project. It imports `.` and `./AmazonBedrockLanguageModel` with Node, and fails unless `.` exports exactly the five `AmazonBedrock*` modules and `model` is a function. Then it copies the "Generate text" example from the README into `main.ts`, type-checks it with `tsc`, and runs it with Node, fake credentials, and a stubbed `fetch`, so no request leaves the machine. The stub fails the run unless the request goes to the `eu-west-1` Converse URL and its SigV4 signature uses the fake key, the `eu-west-1` region, and the `bedrock` service, and signs `host` and `x-amz-date`. The script deletes the project when it exits. Give it a directory that does not exist yet, as in `bash scripts/smoke-consumer.sh <dir>`, to keep the project there.
+
+The operator publishes with this command:
+
+```sh
+git fetch origin
+cd packages/amazon-bedrock && pnpm publish
+```
+
+Publish with `pnpm`, never with `npm publish`. `pnpm publish` replaces `exports` with `publishConfig.exports`, which point into `dist/`. npm ignores `publishConfig.exports` and warns `Unknown publishConfig config "exports"`, so its tarball would point `exports` at the `.ts` files in `src/`.
+
+`pnpm publish` stops with `ERR_PNPM_GIT_UNCLEAN` if the checkout has a changed or untracked file. It stops with `ERR_PNPM_GIT_NOT_LATEST` if the upstream of `main`, `origin/main`, has a commit that `main` does not have. It does not stop when `main` is only ahead of `origin/main`. `pnpm publish` compares `main` with the `origin/main` ref that the last `git fetch` wrote, and it does not fetch. Without the `git fetch origin`, it misses commits that reached `origin` since the last fetch. If `main` has no upstream, it never stops with `ERR_PNPM_GIT_NOT_LATEST`. Step 5 pushes `main` so that the published version is a commit on GitHub, where the package's `repository` and `homepage` links point.
+
+The `prepublishOnly` script deletes `dist/` and `tsconfig.tsbuildinfo`, then runs `pnpm build`. `pnpm build` alone is incremental. It leaves the output of a deleted module in `dist/`, where the `./*` export would publish it, and it does not emit again a `dist/` file that someone deleted. The package sets no `publishConfig.provenance`, because a publish from a local machine has no OIDC identity to sign the provenance with.
