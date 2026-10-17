@@ -11,7 +11,7 @@
  * so decoding never fails on them.
  *
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as Schema from "effect/Schema"
 
@@ -24,7 +24,7 @@ const makeIdentifier = (name: string) => `${prefix}/${name}`
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const IntZeroOrGreater = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -33,7 +33,7 @@ export const IntZeroOrGreater = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const StopReason = Schema.Literals([
   "end_turn",
@@ -52,7 +52,7 @@ export const StopReason = Schema.Literals([
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export type StopReason = typeof StopReason.Type
 
@@ -61,7 +61,7 @@ export type StopReason = typeof StopReason.Type
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class TokenUsage extends Schema.Class<TokenUsage>(makeIdentifier("TokenUsage"))({
   inputTokens: IntZeroOrGreater,
@@ -80,7 +80,7 @@ export class TokenUsage extends Schema.Class<TokenUsage>(makeIdentifier("TokenUs
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ToolUseBlock extends Schema.Class<ToolUseBlock>(makeIdentifier("ToolUseBlock"))({
   toolUseId: Schema.String,
@@ -94,7 +94,7 @@ export class ToolUseBlock extends Schema.Class<ToolUseBlock>(makeIdentifier("Too
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ToolResultBlock extends Schema.Class<ToolResultBlock>(makeIdentifier("ToolResultBlock"))({
   toolUseId: Schema.String,
@@ -112,7 +112,7 @@ export class ToolResultBlock extends Schema.Class<ToolResultBlock>(makeIdentifie
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ReasoningTextBlock extends Schema.Class<ReasoningTextBlock>(makeIdentifier("ReasoningTextBlock"))({
   text: Schema.String,
@@ -131,7 +131,7 @@ export class ReasoningTextBlock extends Schema.Class<ReasoningTextBlock>(makeIde
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const ReasoningContentBlock = Schema.Struct({
   reasoningText: Schema.optional(ReasoningTextBlock),
@@ -155,7 +155,7 @@ export const ReasoningContentBlock = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class CachePointBlock extends Schema.Class<CachePointBlock>(makeIdentifier("CachePointBlock"))({
   type: Schema.Literal("default"),
@@ -167,7 +167,7 @@ export class CachePointBlock extends Schema.Class<CachePointBlock>(makeIdentifie
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class S3Location extends Schema.Class<S3Location>(makeIdentifier("S3Location"))({
   uri: Schema.String,
@@ -185,7 +185,7 @@ export class S3Location extends Schema.Class<S3Location>(makeIdentifier("S3Locat
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const MediaSource = Schema.Struct({
   bytes: Schema.optional(Schema.String),
@@ -205,7 +205,7 @@ export const MediaSource = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const DocumentSource = Schema.Struct({
   ...MediaSource.fields,
@@ -217,7 +217,7 @@ export const DocumentSource = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ImageBlock extends Schema.Class<ImageBlock>(makeIdentifier("ImageBlock"))({
   format: Schema.Literals(["png", "jpeg", "gif", "webp"]),
@@ -234,7 +234,7 @@ export class ImageBlock extends Schema.Class<ImageBlock>(makeIdentifier("ImageBl
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class CitationsConfig extends Schema.Class<CitationsConfig>(makeIdentifier("CitationsConfig"))({
   enabled: Schema.Boolean
@@ -255,7 +255,7 @@ export class CitationsConfig extends Schema.Class<CitationsConfig>(makeIdentifie
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class DocumentBlock extends Schema.Class<DocumentBlock>(makeIdentifier("DocumentBlock"))({
   format: Schema.Literals(["pdf", "csv", "doc", "docx", "xls", "xlsx", "html", "txt", "md"]),
@@ -277,7 +277,7 @@ export class DocumentBlock extends Schema.Class<DocumentBlock>(makeIdentifier("D
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class DocumentLocation extends Schema.Class<DocumentLocation>(makeIdentifier("DocumentLocation"))({
   documentIndex: Schema.optional(Schema.Number),
@@ -296,7 +296,7 @@ export class DocumentLocation extends Schema.Class<DocumentLocation>(makeIdentif
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const CitationLocation = Schema.Struct({
   documentChar: Schema.optional(DocumentLocation),
@@ -315,7 +315,7 @@ export const CitationLocation = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const CitationTextContent = Schema.Struct({
   text: Schema.optional(Schema.String)
@@ -326,7 +326,7 @@ export const CitationTextContent = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class Citation extends Schema.Class<Citation>(makeIdentifier("Citation"))({
   title: Schema.optional(Schema.String),
@@ -345,7 +345,7 @@ export class Citation extends Schema.Class<Citation>(makeIdentifier("Citation"))
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class CitationsContentBlock extends Schema.Class<CitationsContentBlock>(
   makeIdentifier("CitationsContentBlock")
@@ -367,7 +367,7 @@ export class CitationsContentBlock extends Schema.Class<CitationsContentBlock>(
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const ContentBlock = Schema.Struct({
   type: Schema.tagDefaultOmit("text"),
@@ -386,7 +386,7 @@ export const ContentBlock = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class Message extends Schema.Class<Message>(makeIdentifier("Message"))({
   role: Schema.Literals(["user", "assistant"]),
@@ -403,7 +403,7 @@ export class Message extends Schema.Class<Message>(makeIdentifier("Message"))({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const SystemContentBlock = Schema.Struct({
   text: Schema.optional(Schema.String),
@@ -415,7 +415,7 @@ export const SystemContentBlock = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class InferenceConfiguration extends Schema.Class<InferenceConfiguration>(
   makeIdentifier("InferenceConfiguration")
@@ -431,7 +431,7 @@ export class InferenceConfiguration extends Schema.Class<InferenceConfiguration>
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ToolSpecification extends Schema.Class<ToolSpecification>(makeIdentifier("ToolSpecification"))({
   name: Schema.String,
@@ -456,7 +456,7 @@ export class ToolSpecification extends Schema.Class<ToolSpecification>(makeIdent
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class Tool extends Schema.Class<Tool>(makeIdentifier("Tool"))({
   toolSpec: Schema.optional(ToolSpecification),
@@ -469,7 +469,7 @@ export class Tool extends Schema.Class<Tool>(makeIdentifier("Tool"))({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const ToolChoice = Schema.Union([
   Schema.Struct({ auto: Schema.Struct({}) }),
@@ -482,7 +482,7 @@ export const ToolChoice = Schema.Union([
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export type ToolChoice = typeof ToolChoice.Type
 
@@ -491,7 +491,7 @@ export type ToolChoice = typeof ToolChoice.Type
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ToolConfiguration extends Schema.Class<ToolConfiguration>(makeIdentifier("ToolConfiguration"))({
   tools: Schema.Array(Tool),
@@ -508,7 +508,7 @@ export class ToolConfiguration extends Schema.Class<ToolConfiguration>(makeIdent
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const JsonSchemaDefinition = Schema.Struct({
   schema: Schema.String,
@@ -522,7 +522,7 @@ export const JsonSchemaDefinition = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const OutputFormatStructure = Schema.Struct({
   jsonSchema: JsonSchemaDefinition
@@ -533,7 +533,7 @@ export const OutputFormatStructure = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const OutputFormat = Schema.Struct({
   type: Schema.Literal("json_schema"),
@@ -547,7 +547,7 @@ export const OutputFormat = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const OutputConfig = Schema.Struct({
   textFormat: Schema.optionalKey(OutputFormat),
@@ -570,7 +570,7 @@ export const OutputConfig = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ConverseRequest extends Schema.Class<ConverseRequest>(makeIdentifier("ConverseRequest"))({
   modelId: Schema.String,
@@ -591,7 +591,7 @@ export class ConverseRequest extends Schema.Class<ConverseRequest>(makeIdentifie
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ConverseOutput extends Schema.Class<ConverseOutput>(makeIdentifier("ConverseOutput"))({
   message: Message
@@ -602,7 +602,7 @@ export class ConverseOutput extends Schema.Class<ConverseOutput>(makeIdentifier(
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ConverseMetrics extends Schema.Class<ConverseMetrics>(makeIdentifier("ConverseMetrics"))({
   latencyMs: Schema.Number
@@ -613,7 +613,7 @@ export class ConverseMetrics extends Schema.Class<ConverseMetrics>(makeIdentifie
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ConverseResponse extends Schema.Class<ConverseResponse>(makeIdentifier("ConverseResponse"))({
   output: ConverseOutput,
@@ -631,7 +631,7 @@ export class ConverseResponse extends Schema.Class<ConverseResponse>(makeIdentif
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class MessageStartEvent extends Schema.Class<MessageStartEvent>(
   makeIdentifier("MessageStartEvent")
@@ -646,7 +646,7 @@ export class MessageStartEvent extends Schema.Class<MessageStartEvent>(
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const ToolUseBlockDelta = Schema.Struct({
   input: Schema.String
@@ -663,7 +663,7 @@ export const ToolUseBlockDelta = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const ReasoningContentBlockDelta = Schema.Struct({
   text: Schema.optional(Schema.String),
@@ -681,7 +681,7 @@ export const ReasoningContentBlockDelta = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class CitationsDelta extends Schema.Class<CitationsDelta>(makeIdentifier("CitationsDelta"))({
   title: Schema.optional(Schema.String),
@@ -703,7 +703,7 @@ export class CitationsDelta extends Schema.Class<CitationsDelta>(makeIdentifier(
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const ContentBlockDelta = Schema.Struct({
   text: Schema.optional(Schema.String),
@@ -717,7 +717,7 @@ export const ContentBlockDelta = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ContentBlockDeltaEvent extends Schema.Class<ContentBlockDeltaEvent>(
   makeIdentifier("ContentBlockDeltaEvent")
@@ -731,7 +731,7 @@ export class ContentBlockDeltaEvent extends Schema.Class<ContentBlockDeltaEvent>
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ContentBlockStopEvent extends Schema.Class<ContentBlockStopEvent>(
   makeIdentifier("ContentBlockStopEvent")
@@ -745,7 +745,7 @@ export class ContentBlockStopEvent extends Schema.Class<ContentBlockStopEvent>(
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const ToolUseBlockStart = Schema.Struct({
   toolUseId: Schema.String,
@@ -763,7 +763,7 @@ export const ToolUseBlockStart = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const ContentBlockStart = Schema.Struct({
   toolUse: Schema.optional(ToolUseBlockStart)
@@ -777,7 +777,7 @@ export const ContentBlockStart = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ContentBlockStartEvent extends Schema.Class<ContentBlockStartEvent>(
   makeIdentifier("ContentBlockStartEvent")
@@ -791,7 +791,7 @@ export class ContentBlockStartEvent extends Schema.Class<ContentBlockStartEvent>
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class MessageStopEvent extends Schema.Class<MessageStopEvent>(
   makeIdentifier("MessageStopEvent")
@@ -804,7 +804,7 @@ export class MessageStopEvent extends Schema.Class<MessageStopEvent>(
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class ConverseStreamMetadataEvent extends Schema.Class<ConverseStreamMetadataEvent>(
   makeIdentifier("ConverseStreamMetadataEvent")
@@ -828,7 +828,7 @@ const ExceptionBody = Schema.Struct({
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const ConverseResponseStreamEvent = Schema.Union([
   Schema.Struct({
@@ -882,6 +882,6 @@ export const ConverseResponseStreamEvent = Schema.Union([
  *
  * @stability unstable
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  */
 export type ConverseResponseStreamEvent = typeof ConverseResponseStreamEvent.Type

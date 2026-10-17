@@ -13,7 +13,7 @@
  * `converse-stream` (streaming) endpoints.
  *
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 import { AwsV4Signer } from "aws4fetch"
 import type * as AiError from "effect/ai/AiError"
@@ -47,7 +47,7 @@ import * as Errors from "./internal/errors.ts"
  *
  * @stability unstable
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  */
 export interface Service {
   /**
@@ -76,7 +76,7 @@ export interface Service {
  *
  * @stability unstable
  * @category services
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class AmazonBedrockClient extends Context.Service<AmazonBedrockClient, Service>()(
   "@wmaurer/effect-ai-amazon-bedrock/AmazonBedrockClient"
@@ -91,7 +91,7 @@ export class AmazonBedrockClient extends Context.Service<AmazonBedrockClient, Se
  *
  * @stability unstable
  * @category options
- * @since 4.0.0
+ * @since 0.1.0
  */
 export type Options = {
   /**
@@ -130,7 +130,7 @@ const withRedactedHeaders = Effect.updateService(Headers.CurrentRedactedNames, a
  *
  * @stability unstable
  * @category constructors
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const make = Effect.fnUntraced(
   function*(options: Options): Effect.fn.Return<Service, never, HttpClient.HttpClient> {
@@ -224,7 +224,7 @@ export const make = Effect.fnUntraced(
  *
  * @stability unstable
  * @category layers
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const layer = (options: Options): Layer.Layer<AmazonBedrockClient, never, HttpClient.HttpClient> =>
   Layer.effect(AmazonBedrockClient, make(options))
@@ -235,7 +235,7 @@ export const layer = (options: Options): Layer.Layer<AmazonBedrockClient, never,
  *
  * @stability unstable
  * @category layers
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const layerConfig = (options: {
   readonly apiUrl?: Config.Config<string> | undefined

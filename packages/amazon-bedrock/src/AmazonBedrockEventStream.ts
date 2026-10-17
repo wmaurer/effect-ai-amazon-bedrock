@@ -17,7 +17,7 @@
  * for more information.
  *
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as Arr from "effect/Array"
 import type { NonEmptyReadonlyArray } from "effect/Array"
@@ -35,7 +35,7 @@ const textDecoder = new TextDecoder()
  *
  * @stability unstable
  * @category errors
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class EventStreamError extends Schema.TaggedError<EventStreamError>(
   "@wmaurer/effect-ai-amazon-bedrock/AmazonBedrockEventStream/EventStreamError"
@@ -138,7 +138,7 @@ const decodeFrame = (frame: Uint8Array): DecodedFrame => {
  *
  * @stability unstable
  * @category constructors
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const makeChannel = <A, I, RD, IE, Done>(
   schema: Schema.Codec<A, I, RD>

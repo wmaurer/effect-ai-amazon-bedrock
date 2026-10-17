@@ -23,7 +23,7 @@
  * deltas Converse returns are surfaced as document source parts.
  *
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as AiError from "effect/ai/AiError"
 import { toCodecAnthropic } from "effect/ai/AnthropicStructuredOutput"
@@ -73,7 +73,7 @@ import * as InternalUtilities from "./internal/utilities.ts"
  *
  * @stability unstable
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  */
 export type Model = string & {}
 
@@ -92,7 +92,7 @@ export type Model = string & {}
  *
  * @stability unstable
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  */
 export type CachePoint = typeof CachePointBlock.Encoded
 
@@ -123,7 +123,7 @@ export type CachePoint = typeof CachePointBlock.Encoded
  *
  * @stability unstable
  * @category services
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const ToolCachePoint = Context.Reference<CachePoint | undefined>(
   "@wmaurer/effect-ai-amazon-bedrock/AmazonBedrockLanguageModel/ToolCachePoint",
@@ -154,7 +154,7 @@ declare module "effect/ai/Prompt" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface SystemMessageOptions extends CachePointOptions {}
 
@@ -163,7 +163,7 @@ declare module "effect/ai/Prompt" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface UserMessageOptions extends CachePointOptions {}
 
@@ -172,7 +172,7 @@ declare module "effect/ai/Prompt" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface AssistantMessageOptions extends CachePointOptions {}
 
@@ -181,7 +181,7 @@ declare module "effect/ai/Prompt" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface ToolMessageOptions extends CachePointOptions {}
 
@@ -190,7 +190,7 @@ declare module "effect/ai/Prompt" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface TextPartOptions extends CachePointOptions {}
 
@@ -199,7 +199,7 @@ declare module "effect/ai/Prompt" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface ToolCallPartOptions extends CachePointOptions {}
 
@@ -208,7 +208,7 @@ declare module "effect/ai/Prompt" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface ToolResultPartOptions extends CachePointOptions {}
 }
@@ -242,7 +242,7 @@ const pushCachePoint = (
  *
  * @stability unstable
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  */
 export type Citations = typeof CitationsConfig.Encoded
 
@@ -283,7 +283,7 @@ declare module "effect/ai/Prompt" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface FilePartOptions extends FileOptions {}
 }
@@ -299,7 +299,7 @@ declare module "effect/ai/Response" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface DocumentSourcePartMetadata extends ProviderMetadata {
     readonly amazonBedrock?: {
@@ -403,7 +403,7 @@ const citationSource: (
  *
  * @stability unstable
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  */
 export type ReasoningInfo = {
   readonly type: "reasoningText"
@@ -433,7 +433,7 @@ declare module "effect/ai/Prompt" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface ReasoningPartOptions extends ProviderOptions {
     readonly amazonBedrock?: {
@@ -448,7 +448,7 @@ declare module "effect/ai/Response" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface ReasoningPartMetadata extends ProviderMetadata {
     readonly amazonBedrock?: {
@@ -467,7 +467,7 @@ declare module "effect/ai/Response" {
    *
    * @stability unstable
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface ReasoningDeltaPartMetadata extends ProviderMetadata {
     readonly amazonBedrock?: {
@@ -525,7 +525,7 @@ const reasoningTextInfo = (signature: string | undefined): ReasoningInfo => ({
  *
  * @stability unstable
  * @category configuration
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class Config extends Context.Service<
   Config,
@@ -598,7 +598,7 @@ export class Config extends Context.Service<
  *
  * @stability unstable
  * @category constructors
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const model = (
   model: (string & {}) | Model,
@@ -612,7 +612,7 @@ export const model = (
  *
  * @stability unstable
  * @category constructors
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const make = Effect.fnUntraced(function*({ config: providerConfig, model }: {
   readonly model: (string & {}) | Model
@@ -742,7 +742,7 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
  *
  * @stability unstable
  * @category layers
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const layer = (options: {
   readonly model: (string & {}) | Model
@@ -755,7 +755,7 @@ export const layer = (options: {
  *
  * @stability unstable
  * @category configuration
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const withConfigOverride: {
   (overrides: typeof Config.Service): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, Exclude<R, Config>>

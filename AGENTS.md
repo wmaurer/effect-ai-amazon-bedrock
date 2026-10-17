@@ -12,6 +12,8 @@ The package started as `packages/ai/amazon-bedrock` in a fork of `effect-ts/effe
 
 `effect` is a peer dependency (`^4.0.5`) and a dev dependency pinned to the version the tests run on. The `overrides` entry in `pnpm-workspace.yaml` pins the same version for the whole workspace. To upgrade Effect, bump the `effect` dev pin in `packages/amazon-bedrock/package.json`, the `@effect/vitest` dev pin in the root `package.json`, and the override together.
 
+A `@since` tag names the version of this package that added the API, such as `0.1.0`. Effect tags the Effect release instead, so `scripts/upstream-check.sh` rewrites every `@since` in the copy to `UPSTREAM_SINCE`, which defaults to `4.0.0`.
+
 `src/index.ts` comes from the `effect-utils codegen` command of the Effect monorepo, which this repository does not have. When you add a module, add an export block in the same form as the others, a JSDoc comment with `@stability unstable` and `@since`, and an `export * as` line. The new module's own JSDoc and each of its exports need a `@stability` tag too, because the fork's `tsc` and its JSDoc check require one. The `barrel` step of `scripts/upstream-check.sh` runs the codegen and fails if its output differs from the file.
 
 `docs/TODO.md` lists the Converse capabilities the provider does not model yet. Read it before you add one. `docs/design/` holds the design records for earlier features. They are copied verbatim from the Effect fork, so oxlint and dprint skip `docs/`.

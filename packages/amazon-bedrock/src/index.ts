@@ -1,36 +1,36 @@
 /**
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 
 // @barrel: Auto-generated exports. Do not edit manually.
 
 /**
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 export * as AmazonBedrockClient from "./AmazonBedrockClient.ts"
 
 /**
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 export * as AmazonBedrockConfig from "./AmazonBedrockConfig.ts"
 
 /**
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 export * as AmazonBedrockEventStream from "./AmazonBedrockEventStream.ts"
 
 /**
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 export * as AmazonBedrockLanguageModel from "./AmazonBedrockLanguageModel.ts"
 
 /**
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 export * as AmazonBedrockSchema from "./AmazonBedrockSchema.ts"

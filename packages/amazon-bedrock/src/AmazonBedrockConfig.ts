@@ -4,7 +4,7 @@
  * underlying HTTP client without changing individual request code.
  *
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -17,7 +17,7 @@ import type { HttpClient } from "effect/http/HttpClient"
  *
  * @stability unstable
  * @category services
- * @since 4.0.0
+ * @since 0.1.0
  */
 export class AmazonBedrockConfig extends Context.Service<
   AmazonBedrockConfig,
@@ -26,7 +26,7 @@ export class AmazonBedrockConfig extends Context.Service<
   /**
    * Gets the configured Amazon Bedrock service from the current context when present.
    *
-   * @since 4.0.0
+   * @since 0.1.0
    */
   static readonly getOrUndefined: Effect.Effect<typeof AmazonBedrockConfig.Service | undefined> = Effect.map(
     Effect.context<never>(),
@@ -38,14 +38,14 @@ export class AmazonBedrockConfig extends Context.Service<
  * Namespace containing types associated with the `AmazonBedrockConfig` service.
  *
  * @stability unstable
- * @since 4.0.0
+ * @since 0.1.0
  */
 export declare namespace AmazonBedrockConfig {
   /**
    * Configuration provided through `AmazonBedrockConfig`.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.1.0
    */
   export interface Service {
     readonly transformClient?: ((client: HttpClient) => HttpClient) | undefined
@@ -58,7 +58,7 @@ export declare namespace AmazonBedrockConfig {
  *
  * @stability unstable
  * @category configuration
- * @since 4.0.0
+ * @since 0.1.0
  */
 export const withClientTransform: {
   (transform: (client: HttpClient) => HttpClient): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>

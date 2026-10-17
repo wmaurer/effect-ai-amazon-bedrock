@@ -24,6 +24,7 @@ summary="$logs/upstream-summary.log"
 : >"$summary"
 fork=${FORK_REPO:?set FORK_REPO to a git checkout of effect-ts/effect}
 ref=${FORK_REF:-32f48b948d}
+since=${UPSTREAM_SINCE:-4.0.0}
 wt="$logs/fork-wt"
 pkg=packages/ai/amazon-bedrock
 
@@ -119,6 +120,8 @@ if [ -n "$renamed" ]; then
   (cd "$wt" && echo "$renamed" | xargs sed -i 's#@wmaurer/effect-ai-amazon-bedrock#@effect/ai-amazon-bedrock#g')
   step reverse-fmt pnpm exec dprint fmt $renamed || fail=1
 fi
+# The package tags its own versions, and Effect tags the Effect release that adds the package.
+(cd "$wt" && grep -rl '@since' "$pkg/src" "$pkg/test" | xargs -r sed -i -E "s/@since [0-9]+\.[0-9]+\.[0-9]+/@since $since/g")
 # git diff ignores untracked files, so mark the copied files as intent-to-add
 # to make src-diff and test-diff show added files.
 (cd "$wt" && git add -N "$pkg/src" "$pkg/test")
