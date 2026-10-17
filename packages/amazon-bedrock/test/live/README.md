@@ -9,7 +9,7 @@ The suites stay in this repository. An upstream pull request to Effect leaves th
 - Run every command in this guide from the repository root. `pnpm test:live` is a script in the root `package.json`. In `packages/amazon-bedrock`, pnpm stops with `Command "test:live" not found`.
 - Get temporary AWS credentials. AWS STS issues them for a session, for example when you assume an IAM role or sign in through IAM Identity Center. They are three values: an access key id that starts with `ASIA`, a secret access key, and a session token. They stop working when the session expires.
 - Do not use a long-lived IAM user key, whose id starts with `AKIA`. It has no session token, and one test in the errors suite needs AWS to reject a request that leaves the token out.
-- Check that the IAM policy behind the credentials allows `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream`. The default models are EU geo inference profiles, so the policy must allow the `inference-profile` ARN and also the `foundation-model` ARN in every region that the profile sends requests to.
+- Check that the IAM policy behind the credentials allows `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream`, and `bedrock:CallWithBearerToken`. The credentials suite makes a short-term Bedrock API key from the credentials, and the last permission lets that key call Bedrock. The default models are EU geo inference profiles, so the policy must allow the `inference-profile` ARN and also the `foundation-model` ARN in every region that the profile sends requests to.
 
 ## Run the suites
 
@@ -38,8 +38,8 @@ The suites stay in this repository. An upstream pull request to Effect leaves th
    Every file and every test passes. With the current suites, the summary is:
 
    ```text
-   Test Files  6 passed (6)
-        Tests  22 passed (22)
+   Test Files  7 passed (7)
+        Tests  27 passed (27)
    ```
 
 ## Two gates keep the suites from running by accident
@@ -59,7 +59,7 @@ Put the start of the suite's file name after `test/live`, up to and including `.
 EFFECT_INTEGRATION_TESTS=1 pnpm vitest run --no-file-parallelism test/live/AmazonBedrockErrors.integration
 ```
 
-vitest matches the filter against any part of the path. Every file name starts with `AmazonBedrock`, so `test/live/AmazonBedrock` matches all six files. To run only the core suite, use `test/live/AmazonBedrock.integration`. `pnpm test:live` always runs every file, even with a file name after it.
+vitest matches the filter against any part of the path. Every file name starts with `AmazonBedrock`, so `test/live/AmazonBedrock` matches all seven files. To run only the core suite, use `test/live/AmazonBedrock.integration`. `pnpm test:live` always runs every file, even with a file name after it.
 
 Keep `--no-file-parallelism` whenever the filter can match more than one file. Without the flag, vitest runs the files at the same time. Each suite declares `{ concurrent: false }`, but that orders only the tests inside one file. The burst of calls can exceed the account's on-demand tokens-per-minute quota, and then some tests fail with `RateLimitError`.
 
@@ -81,11 +81,12 @@ AWS rejects every call of the errors suite before it reaches a model, so those c
 
 ## What each suite checks
 
-| File                                         | What it checks                                                                                                                                               |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `AmazonBedrock.integration.test.ts`          | `generateText`, `generateObject` on the native and the object-tool paths, the `max_tokens` stop reason, cache checkpoints at both TTLs, the usage arithmetic |
-| `AmazonBedrockStream.integration.test.ts`    | Text deltas over several event-stream frames, and a tool call whose input JSON is split across frames                                                        |
-| `AmazonBedrockContent.integration.test.ts`   | Image blocks, document blocks, and citations                                                                                                                 |
-| `AmazonBedrockErrors.integration.test.ts`    | The `x-amzn-errortype` values behind `AuthenticationError.kind`, and signing with no session token                                                           |
-| `AmazonBedrockTools.integration.test.ts`     | A `toolResult` sent back against its `toolUse`, and `generateObject` with tool history in the prompt                                                         |
-| `AmazonBedrockReasoning.integration.test.ts` | Extended thinking through `additionalModelRequestFields`, the signed reasoning block sent back in a later turn, and reasoning deltas over the stream         |
+| File                                           | What it checks                                                                                                                                                                      |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AmazonBedrock.integration.test.ts`            | `generateText`, `generateObject` on the native and the object-tool paths, the `max_tokens` stop reason, cache checkpoints at both TTLs, the usage arithmetic                        |
+| `AmazonBedrockStream.integration.test.ts`      | Text deltas over several event-stream frames, and a tool call whose input JSON is split across frames                                                                               |
+| `AmazonBedrockContent.integration.test.ts`     | Image blocks, document blocks, and citations                                                                                                                                        |
+| `AmazonBedrockErrors.integration.test.ts`      | The `x-amzn-errortype` values behind `AuthenticationError.kind`, and signing with no session token                                                                                  |
+| `AmazonBedrockTools.integration.test.ts`       | A `toolResult` sent back against its `toolUse`, and `generateObject` with tool history in the prompt                                                                                |
+| `AmazonBedrockCredentials.integration.test.ts` | A function and an `Effect` credential provider, a refetch with `forceRefresh` after AWS rejects the provider's credentials, and a short-term Bedrock API key, accepted and tampered |
+| `AmazonBedrockReasoning.integration.test.ts`   | Extended thinking through `additionalModelRequestFields`, the signed reasoning block sent back in a later turn, and reasoning deltas over the stream                                |
