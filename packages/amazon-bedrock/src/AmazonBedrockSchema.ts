@@ -29,13 +29,13 @@ const makeIdentifier = (name: string) => `${prefix}/${name}`
 export const IntZeroOrGreater = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 /**
- * The reason the model stopped generating a response.
+ * The stop reasons that the Smithy model of the Converse API names.
  *
  * @stability unstable
  * @category schemas
- * @since 0.1.0
+ * @since 0.3.0
  */
-export const StopReason = Schema.Literals([
+export const KnownStopReason = Schema.Literals([
   "end_turn",
   "tool_use",
   "max_tokens",
@@ -46,6 +46,29 @@ export const StopReason = Schema.Literals([
   "malformed_tool_use",
   "model_context_window_exceeded"
 ])
+
+/**
+ * The type of {@link KnownStopReason}.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.3.0
+ */
+export type KnownStopReason = typeof KnownStopReason.Type
+
+/**
+ * The reason the model stopped generating a response.
+ *
+ * **Details**
+ *
+ * Any string decodes, so a reason that Bedrock adds later, or that a model
+ * returns outside the Smithy model, does not fail the response.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.1.0
+ */
+export const StopReason = Schema.Union([KnownStopReason, Schema.StringForLiteralAutocomplete])
 
 /**
  * The type of {@link StopReason}.

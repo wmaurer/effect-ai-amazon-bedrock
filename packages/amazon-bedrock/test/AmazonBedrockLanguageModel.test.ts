@@ -446,6 +446,38 @@ describe("AmazonBedrockLanguageModel", () => {
         }
       }))
 
+    const stopReasonCases = [
+      { stopReason: "end_turn", finishReason: "stop" },
+      { stopReason: "tool_use", finishReason: "tool-calls" },
+      { stopReason: "max_tokens", finishReason: "length" },
+      { stopReason: "stop_sequence", finishReason: "stop" },
+      { stopReason: "guardrail_intervened", finishReason: "content-filter" },
+      { stopReason: "content_filtered", finishReason: "content-filter" },
+      { stopReason: "malformed_model_output", finishReason: "error" },
+      { stopReason: "malformed_tool_use", finishReason: "error" },
+      { stopReason: "model_context_window_exceeded", finishReason: "length" },
+      { stopReason: "brand_new_reason", finishReason: "other" },
+      { stopReason: "toString", finishReason: "other" }
+    ] as const
+
+    for (const testCase of stopReasonCases) {
+      it.effect(`maps stop reason ${testCase.stopReason} to finish reason ${testCase.finishReason}`, () =>
+        Effect.gen(function*() {
+          const handler = (request: HttpClientRequest.HttpClientRequest) =>
+            Effect.succeed(jsonResponse(request, {
+              output: { message: { role: "assistant", content: [{ text: "Partial answer" }] } },
+              usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+              stopReason: testCase.stopReason
+            }))
+
+          const response = yield* LanguageModel.generateText({ prompt: "Q" }).pipe(
+            Effect.provide(layersFor(handler))
+          )
+          assert.strictEqual(response.text, "Partial answer")
+          assert.strictEqual(response.finishReason, testCase.finishReason)
+        }))
+    }
+
     it.effect("maps 429 to a RateLimitError", () =>
       Effect.gen(function*() {
         const handler = (request: HttpClientRequest.HttpClientRequest) =>
@@ -1900,6 +1932,29 @@ describe("AmazonBedrockLanguageModel", () => {
           "text-end",
           "finish"
         ])
+      }))
+
+    it.effect("finishes with reason other on a stop reason outside the known set", () =>
+      Effect.gen(function*() {
+        const frames = [
+          eventFrame("messageStart", { role: "assistant" }),
+          eventFrame("contentBlockDelta", { contentBlockIndex: 0, delta: { text: "Partial answer" } }),
+          eventFrame("contentBlockStop", { contentBlockIndex: 0 }),
+          eventFrame("messageStop", { stopReason: "brand_new_reason" }),
+          eventFrame("metadata", { usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } })
+        ]
+        const parts = yield* streamParts(frames)
+        assert.deepStrictEqual(parts.map((part) => part.type), [
+          "response-metadata",
+          "text-start",
+          "text-delta",
+          "text-end",
+          "finish"
+        ])
+        const delta = parts[2]!
+        assert.strictEqual(delta.type === "text-delta" && delta.delta, "Partial answer")
+        const finish = parts[4]!
+        assert.strictEqual(finish.type === "finish" && finish.reason, "other")
       }))
 
     it.effect("streams reasoningContent deltas as reasoning parts", () =>
