@@ -2100,7 +2100,6 @@ describe("AmazonBedrockLanguageModel", () => {
 
     it.effect("fails with an InvalidOutputError when the streamed tool input is not JSON", () =>
       Effect.gen(function*() {
-        // Qwen3 32B on Bedrock streamed tool input without its opening `{"`.
         const error = yield* Effect.flip(streamToolParts([
           eventFrame("messageStart", { role: "assistant" }),
           eventFrame("contentBlockStart", {

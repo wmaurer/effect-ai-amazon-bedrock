@@ -79,6 +79,19 @@ AWS rejects every call of the errors suite before it reaches a model, so those c
 - The cache tests send a system prompt of more than a thousand lines and pay for two cache writes.
 - The reasoning tests allow up to a few thousand output tokens per call.
 
+## Probe a model
+
+`probe-models.ts` is a script, not a suite. It shows which calls a model accepts through this provider. For each model ID you give it, it runs six calls: a `generateText`, a `streamText` that should call a tool, a `generateText` with `toolChoice: "required"`, and `generateObject` with native structured output, with the forced object tool, and with the unforced object tool. It prints one tab-separated row per model and call, with `OK` or `ERR` and the result or the error.
+
+The script makes real Bedrock calls and costs money. It reads the credentials from the same variables as the suites, and the region from `AWS_REGION`, which defaults to `eu-west-1`. To run only some of the calls, set `PROBE_CALLS` to a comma-separated list of their names: `text`, `stream-tool`, `tool-any`, `object-native`, `object-forced`, and `object-unforced`.
+
+```sh
+AWS_REGION=us-east-1 PROBE_CALLS=object-forced,object-unforced \
+  node packages/amazon-bedrock/test/live/probe-models.ts us.meta.llama4-maverick-17b-instruct-v1:0 mistral.mistral-large-3-675b-instruct
+```
+
+The "Models from other providers" section of `docs/TODO.md` records what the probe found.
+
 ## What each suite checks
 
 | File                                           | What it checks                                                                                                                                                                      |
