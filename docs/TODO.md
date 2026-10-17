@@ -163,8 +163,14 @@ Bedrock. The third, a forced `{ tool: { name } }` object tool, is stub-only. The
 to the models that `getModelCapabilities` lists as lacking native structured output, which are the
 Claude 3 models and Claude Sonnet 4 and Opus 4 but not Opus 4.1, unless `Config.forcedToolChoice`
 is `false`. With `structuredOutputs: false` it also sends it to every model that
-`getModelCapabilities` or `Config.forcedToolChoice` says accepts a forced `toolChoice`. The
-`{ any: {} }` tool choice is stub-only too. Image and document `s3Location` sources are untested — they
+`getModelCapabilities` or `Config.forcedToolChoice` says accepts a forced `toolChoice`. The same
+models, the default Sonnet 4.5, Opus 4.8 and Sonnet 5 among them, get it when the prompt holds tool
+calls and no tools go out. No live run covers that fallback. Anthropic rejects a forced
+tool while budget thinking (`thinking.type: "enabled"`) is on, which the AI SDK's Anthropic
+provider accounts for (`packages/anthropic/src/anthropic-language-model.ts` in `vercel/ai` treats
+`thinkingType === 'enabled'` as rejecting forced tool use). So an agent loop that runs with budget
+thinking may get a 400 on the fallback; `forcedToolChoice: false` avoids it. The provider does not
+detect this case. The `{ any: {} }` tool choice is stub-only too. Image and document `s3Location` sources are untested — they
 need a bucket and objects to point at. The 429 -> `RateLimitError` mapping has been seen
 in practice (it is why `--no-file-parallelism` exists) but is asserted nowhere, since
 provoking it means deliberately exceeding the account's token quota.

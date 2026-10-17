@@ -962,7 +962,11 @@ describe("AmazonBedrockLanguageModel", () => {
           return Effect.succeed(cacheResponse(request))
         }
 
-        yield* LanguageModel.generateText({ prompt }).pipe(Effect.provide(layersFor(handler)))
+        // Converse rejects a prompt with tool calls unless the request offers tools.
+        yield* LanguageModel.generateText({ prompt, toolkit: globToolkit }).pipe(
+          Effect.provide(layersFor(handler)),
+          Effect.provide(globToolkitLayer)
+        )
         return yield* getRequestBody(captured!)
       })
 
@@ -1565,6 +1569,180 @@ describe("AmazonBedrockLanguageModel", () => {
         const body = yield* getRequestBody(captured!)
         assert.strictEqual(body.toolConfig.tools[0].toolSpec.name, "Lookup")
         assert.isDefined(body.outputConfig.textFormat)
+      }))
+  })
+
+  describe("a prompt with tool calls", () => {
+    const ReadFile = Tool.make("readFile", {
+      description: "Read a file",
+      parameters: Schema.Struct({ path: Schema.String }),
+      success: Schema.String
+    })
+    const toolkit = Toolkit.make(ReadFile)
+    const toolkitLayer = toolkit.toLayer({ readFile: () => Effect.succeed("ok") })
+
+    const prompt = Prompt.fromMessages([
+      Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Read a.txt." })] }),
+      Prompt.makeMessage("assistant", {
+        content: [Prompt.makePart("tool-call", {
+          id: "tu_1",
+          name: "readFile",
+          params: { path: "a.txt" },
+          providerExecuted: false
+        })]
+      }),
+      Prompt.makeMessage("tool", {
+        content: [Prompt.makePart("tool-result", {
+          id: "tu_1",
+          name: "readFile",
+          isFailure: false,
+          result: "ok",
+          providerExecuted: false
+        })]
+      }),
+      Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Does it say ok?" })] })
+    ])
+
+    const makeHandler = (
+      content: ReadonlyArray<unknown> = [{ toolUse: { toolUseId: "tu_2", name: "result", input: { ok: true } } }]
+    ) => {
+      const bodies: Array<any> = []
+      const handler = (request: HttpClientRequest.HttpClientRequest) =>
+        Effect.map(getRequestBody(request), (body) => {
+          bodies.push(body)
+          return jsonResponse(request, {
+            output: { message: { role: "assistant", content } },
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            stopReason: "tool_use"
+          })
+        })
+      return { bodies, handler }
+    }
+
+    const noToolConfigMessage = "AmazonBedrockLanguageModel.makeRequest: Invalid user input: The prompt " +
+      "contains tool calls or tool results, and Converse rejects them in a request that carries no tools. " +
+      "This request has none: it was given no tools, its toolChoice is a oneOf that names none of them, " +
+      "or its toolChoice is \"none\", which Converse cannot express. Pass the toolkit that produced the " +
+      "tool calls, with toolChoice \"auto\"."
+
+    it.effect("fails before sending a request that offers no tools", () =>
+      Effect.gen(function*() {
+        const { bodies, handler } = makeHandler()
+
+        const error = yield* Effect.flip(
+          LanguageModel.generateText({ prompt }).pipe(Effect.provide(layersFor(handler)))
+        )
+
+        assert.strictEqual(bodies.length, 0)
+        assert.strictEqual(error.reason._tag, "InvalidUserInputError")
+        assert.strictEqual(error.message, noToolConfigMessage)
+      }))
+
+    it.effect("fails before sending a request whose toolChoice is 'none'", () =>
+      Effect.gen(function*() {
+        const { bodies, handler } = makeHandler()
+
+        const error = yield* Effect.flip(
+          LanguageModel.generateText({ prompt, toolkit, toolChoice: "none" }).pipe(
+            Effect.provide(layersFor(handler)),
+            Effect.provide(toolkitLayer)
+          )
+        )
+
+        assert.strictEqual(bodies.length, 0)
+        assert.strictEqual(error.reason._tag, "InvalidUserInputError")
+        assert.strictEqual(error.message, noToolConfigMessage)
+      }))
+
+    it.effect("fails before sending a request whose toolChoice is a oneOf that names no tool", () =>
+      Effect.gen(function*() {
+        const { bodies, handler } = makeHandler()
+
+        const error = yield* Effect.flip(
+          LanguageModel.generateText({ prompt, toolkit, toolChoice: { oneOf: [] } }).pipe(
+            Effect.provide(layersFor(handler)),
+            Effect.provide(toolkitLayer)
+          )
+        )
+
+        assert.strictEqual(bodies.length, 0)
+        assert.strictEqual(error.reason._tag, "InvalidUserInputError")
+        assert.strictEqual(error.message, noToolConfigMessage)
+      }))
+
+    // Without tools a native request would carry no `toolConfig`, so
+    // generateObject asks for the object through the tool on every model.
+    for (
+      const { model, toolChoice } of [
+        { model: "us.test.model-v1:0", toolChoice: { tool: { name: "result" } } },
+        { model: "eu.anthropic.claude-opus-5-5", toolChoice: { auto: {} } }
+      ]
+    ) {
+      it.effect(`asks generateObject on ${model} for the object through the tool when no tools go out`, () =>
+        Effect.gen(function*() {
+          const { bodies, handler } = makeHandler()
+          const schema = Schema.Struct({ ok: Schema.Boolean })
+
+          const withoutToolkit = yield* LanguageModel.generateObject({ prompt, objectName: "result", schema }).pipe(
+            Effect.provide(layersFor(handler, model))
+          )
+          const withNone = yield* LanguageModel.generateObject({
+            prompt,
+            objectName: "result",
+            schema,
+            toolkit,
+            toolChoice: "none"
+          }).pipe(Effect.provide(layersFor(handler, model)), Effect.provide(toolkitLayer))
+
+          assert.deepStrictEqual(withoutToolkit.value, { ok: true })
+          assert.deepStrictEqual(withNone.value, { ok: true })
+          assert.strictEqual(bodies.length, 2)
+          for (const body of bodies) {
+            assert.isUndefined(body.outputConfig)
+            assert.deepStrictEqual(body.toolConfig.tools.map((tool: any) => tool.toolSpec.name), ["result"])
+            assert.deepStrictEqual(body.toolConfig.toolChoice, toolChoice)
+          }
+        }))
+    }
+
+    it.effect("sends a request whose config carries a toolConfig", () =>
+      Effect.gen(function*() {
+        const { bodies, handler } = makeHandler([{ text: "Yes." }])
+        const toolConfig = {
+          tools: [{ toolSpec: { name: "readFile", inputSchema: { json: { type: "object" } } } }]
+        }
+
+        const response = yield* LanguageModel.generateText({ prompt }).pipe(
+          AmazonBedrockLanguageModel.withConfigOverride({ toolConfig }),
+          Effect.provide(layersFor(handler))
+        )
+
+        assert.strictEqual(response.text, "Yes.")
+        assert.strictEqual(bodies.length, 1)
+        assert.deepStrictEqual(bodies[0].toolConfig, toolConfig)
+      }))
+
+    it.effect("sends the object tool as the toolConfig of a generateObject request", () =>
+      Effect.gen(function*() {
+        const { bodies, handler } = makeHandler()
+
+        const result = yield* LanguageModel.generateObject({
+          prompt,
+          objectName: "result",
+          schema: Schema.Struct({ ok: Schema.Boolean })
+        }).pipe(
+          AmazonBedrockLanguageModel.withConfigOverride({ structuredOutputs: false }),
+          Effect.provide(layersFor(handler))
+        )
+
+        assert.deepStrictEqual(result.value, { ok: true })
+        assert.strictEqual(bodies.length, 1)
+        assert.deepStrictEqual(bodies[0].toolConfig.tools.map((tool: any) => tool.toolSpec.name), ["result"])
+        assert.deepStrictEqual(bodies[0].messages[1].content[0].toolUse, {
+          toolUseId: "tu_1",
+          name: "readFile",
+          input: { path: "a.txt" }
+        })
       }))
   })
 

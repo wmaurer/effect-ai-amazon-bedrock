@@ -54,4 +54,56 @@ describe.skipIf(liveDisabled)("Amazon Bedrock tool results (live)", { concurrent
     }).pipe(
       Effect.provide(modelLayer())
     ), TIMEOUT)
+
+  // A prompt with tool history needs `toolConfig`, and Converse has no "none" tool choice. When
+  // no tools go out, `generateText` fails before sending and `generateObject` falls back to the
+  // object tool. Passing the toolkit with "auto" is the workaround the error names; this checks
+  // that Converse accepts it next to native structured output, where the object tool does not
+  // supply the `toolConfig`.
+  it.effect("generateObject accepts tool history when the toolkit goes out with 'auto'", () =>
+    Effect.gen(function*() {
+      const ReadFile = Tool.make("readFile", {
+        description: "Read a file",
+        parameters: Schema.Struct({ path: Schema.String }),
+        success: Schema.Struct({ content: Schema.String })
+      })
+      const toolkit = Toolkit.make(ReadFile)
+      const prompt = Prompt.fromMessages([
+        Prompt.makeMessage("user", {
+          content: [Prompt.makePart("text", { text: "Read a.txt and report whether it says ok." })]
+        }),
+        Prompt.makeMessage("assistant", {
+          content: [Prompt.makePart("tool-call", {
+            id: "toolu_01",
+            name: "readFile",
+            params: { path: "a.txt" },
+            providerExecuted: false
+          })]
+        }),
+        Prompt.makeMessage("tool", {
+          content: [Prompt.makePart("tool-result", {
+            id: "toolu_01",
+            name: "readFile",
+            isFailure: false,
+            result: { content: "ok" },
+            providerExecuted: false
+          })]
+        }),
+        Prompt.makeMessage("user", {
+          content: [Prompt.makePart("text", { text: "Answer now, without calling a tool." })]
+        })
+      ])
+
+      const response = yield* LanguageModel.generateObject({
+        prompt,
+        objectName: "result",
+        schema: Schema.Struct({ ok: Schema.Boolean }),
+        toolkit,
+        toolChoice: "auto"
+      }).pipe(Effect.provide(toolkit.toLayer({ readFile: () => Effect.succeed({ content: "ok" }) })))
+
+      assert.deepStrictEqual(response.value, { ok: true })
+    }).pipe(
+      Effect.provide(modelLayer())
+    ), TIMEOUT)
 })

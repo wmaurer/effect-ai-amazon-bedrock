@@ -9,17 +9,18 @@
  * non-streaming requests via Converse's native `outputConfig.textFormat`
  * json_schema mode, where it can be combined with the caller's own tools. On
  * models without native support (detected from the model id, overridable with
- * `Config.structuredOutputs`) the object is asked for through a tool instead:
- * forced where the model accepts a forced `toolChoice` (overridable with
- * `Config.forcedToolChoice`), and otherwise left unforced with an instruction
- * to call it. Reasoning is surfaced on both paths, and reasoning blocks
- * round-trip into later turns when they carry the Bedrock signature. Image and
- * document file parts are converted into Converse `image` / `document` blocks;
- * a media type Converse does not accept fails loudly with
- * `AiError.InvalidUserInputError` rather than silently dropping content. Prompt
- * caching is opt-in per message or per part via provider options. Citations
- * are opt-in per document, and the citation blocks and deltas Converse returns
- * are surfaced as document source parts.
+ * `Config.structuredOutputs`), and on any model when the prompt holds tool
+ * calls but the request offers no tools, the object is asked for through a
+ * tool instead: forced where the model accepts a forced `toolChoice`
+ * (overridable with `Config.forcedToolChoice`), and otherwise left unforced
+ * with an instruction to call it. Reasoning is surfaced on both paths, and
+ * reasoning blocks round-trip into later turns when they carry the Bedrock
+ * signature. Image and document file parts are converted into Converse
+ * `image` / `document` blocks; a media type Converse does not accept fails
+ * loudly with `AiError.InvalidUserInputError` rather than silently dropping
+ * content. Prompt caching is opt-in per message or per part via provider
+ * options. Citations are opt-in per document, and the citation blocks and
+ * deltas Converse returns are surfaced as document source parts.
  *
  * @stability unstable
  * @since 4.0.0
@@ -558,6 +559,11 @@ export class Config extends Context.Service<
        * a tool instead, which is forced on models that accept a forced
        * `toolChoice` and left unforced, with an instruction to call it, on
        * models that do not. Never sent to Bedrock.
+       *
+       * When the prompt holds tool calls or tool results and the request
+       * offers no tools, `generateObject` uses the tool even when this is
+       * `true`, because Converse rejects such a request without a
+       * `toolConfig`.
        */
       readonly structuredOutputs?: boolean | undefined
       /**
@@ -635,12 +641,23 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
       let system = prepared.system
       let { nameMapper, toolConfig } = yield* prepareTools(options)
       const responseFormat = options.responseFormat
+      // Converse rejects `toolUse` and `toolResult` blocks in a request that
+      // carries no `toolConfig`, and it has no tool choice that offers tools
+      // while forbidding calls to them.
+      const hasToolBlocks = messages.some((message) =>
+        message.content.some((block) =>
+          Predicate.isNotUndefined(block.toolUse) || Predicate.isNotUndefined(block.toolResult)
+        )
+      )
 
       let outputConfig: typeof OutputConfig.Encoded | undefined = config.outputConfig
       if (responseFormat.type === "json") {
         const json = yield* tryJsonSchema(responseFormat.schema, "makeRequest")
         const description = SchemaAST.resolveDescription(responseFormat.schema.ast)
-        if (structuredOutputs ?? capabilities.supportsStructuredOutput) {
+        // A native request with tool history and no tools would carry no
+        // `toolConfig`, so the object tool supplies one.
+        const needsToolConfig = hasToolBlocks && Predicate.isUndefined(toolConfig ?? config.toolConfig)
+        if ((structuredOutputs ?? capabilities.supportsStructuredOutput) && !needsToolConfig) {
           // Native structured output. The caller's own tools still go out
           // alongside it.
           outputConfig = {
@@ -687,6 +704,19 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
         messages,
         ...(Predicate.isNotUndefined(outputConfig) ? { outputConfig } : {}),
         ...(Predicate.isNotUndefined(toolConfig) ? { toolConfig } : {})
+      }
+
+      if (hasToolBlocks && Predicate.isUndefined(request.toolConfig)) {
+        return yield* AiError.make({
+          module: "AmazonBedrockLanguageModel",
+          method: "makeRequest",
+          reason: new AiError.InvalidUserInputError({
+            description: "The prompt contains tool calls or tool results, and Converse rejects them in a " +
+              "request that carries no tools. This request has none: it was given no tools, its toolChoice is " +
+              "a oneOf that names none of them, or its toolChoice is \"none\", which Converse cannot express. " +
+              "Pass the toolkit that produced the tool calls, with toolChoice \"auto\"."
+          })
+        })
       }
       return { request, nameMapper, documents }
     }
