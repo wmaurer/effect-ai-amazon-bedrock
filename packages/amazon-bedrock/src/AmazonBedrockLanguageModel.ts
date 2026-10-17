@@ -675,8 +675,10 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
           }
         } else {
           // The object is asked for through a tool, which replaces the
-          // caller's tools. A model that rejects a forced `toolChoice` gets
-          // the tool unforced, and the request says to call it.
+          // caller's tools. It is the only tool, so `any` forces it, and
+          // Mistral Large 2402 and Pixtral Large accept `any` but reject a
+          // named `tool`. A model that rejects a forced `toolChoice` gets the
+          // tool unforced, and the request says to call it.
           const forced = forcedToolChoice ?? capabilities.supportsForcedToolChoice
           nameMapper = new Tool.NameMapper([])
           toolConfig = {
@@ -687,7 +689,7 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
                 inputSchema: { json: json as Record<string, unknown> }
               }
             }],
-            toolChoice: forced ? { tool: { name: responseFormat.objectName } } : { auto: {} }
+            toolChoice: forced ? { any: {} } : { auto: {} }
           }
           if (!forced) {
             system = [...(system ?? []), {
