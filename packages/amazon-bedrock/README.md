@@ -217,6 +217,8 @@ const BedrockClient = AmazonBedrockClient.layerConfig({
 
 `AWS_BEARER_TOKEN_BEDROCK` is the variable that the AWS SDK for JavaScript reads the key from. The client reads it only through the `Config` that you give it. An `AiError` and an HTTP span that records headers show the `authorization` header as `<redacted>`.
 
+AWS rejects an API key that it does not accept, such as an expired or revoked key, with `AccessDeniedException`, as it rejects a request that the IAM policy does not allow. The request then fails with an `AuthenticationError` of kind `InsufficientPermissions`, and the client cannot tell the two causes apart.
+
 ### Set the other options
 
 The other options are these:

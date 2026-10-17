@@ -9,8 +9,10 @@ Ordered by how likely they are to matter.
 `AmazonBedrockClient` takes fixed keys, a `credentialProvider`, or a Bedrock `apiKey`
 (`AmazonBedrockClient.ts`, `internal/credentials.ts`). These gaps remain:
 
-- No live run has used a credential provider or an API key yet. The unit tests stub the
-  `HttpClient`. Step 5 of the design's implementation plan is that live check.
+- AWS rejects an API key that it does not accept with `AccessDeniedException`, as it rejects a
+  missing IAM permission, so the client reports kind `InsufficientPermissions` for both. The
+  live run on 2026-10-17 observed this for a tampered short-term key. It did not try an
+  expired or revoked key.
 - The client reads no AWS credential chain of its own. A program passes `fromNodeProviderChain()`
   from `@aws-sdk/credential-providers`, or another provider, to `credentialProvider`.
 - The client does not read `AWS_BEARER_TOKEN_BEDROCK` implicitly, as the AI SDK's provider and
@@ -183,6 +185,13 @@ document. Three of the nine mapped Converse stop reasons are observed rather tha
 `x-amzn-errortype` values behind three of the five mapped exception shapes are pinned to
 the strings AWS sends: `UnrecognizedClientException`, `InvalidSignatureException` and
 `AccessDeniedException`.
+
+The 0.2.0 ways to authenticate have run against real Bedrock too, on 2026-10-17. AWS accepts
+a SigV4 signature from credentials that a function or an `Effect` provider returned, over
+Converse and ConverseStream. After AWS rejected a provider's first credentials as
+`InvalidKey`, the next request asked the provider again with `forceRefresh` and succeeded.
+A short-term Bedrock API key, made from the same STS credentials, authenticates a request as a
+bearer token.
 
 Reasoning is closed too, now that `ConverseRequest` models
 `additionalModelRequestFields` and extended thinking can be switched on. All three paths

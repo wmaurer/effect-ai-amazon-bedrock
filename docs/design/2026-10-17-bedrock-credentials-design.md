@@ -1,6 +1,6 @@
 # Credential provider and Bedrock API keys (0.2.0)
 
-Status: implemented on the branch `feat/credentials-0.2.0`, with unit tests against a stubbed `HttpClient`. Plan step 5, the live check, has not run, and step 7, the release, has not started. 0.1.0 is on npm.
+Status: implemented on the branch `feat/credentials-0.2.0`, with unit tests against a stubbed `HttpClient`. Plan step 5, the live check, passed on 2026-10-17 (`test/live/AmazonBedrockCredentials.integration.test.ts`), and step 7, the release, has not started. 0.1.0 is on npm.
 
 ## Problem
 
