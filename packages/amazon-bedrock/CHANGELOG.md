@@ -1,6 +1,6 @@
 # @wmaurer/effect-ai-amazon-bedrock
 
-## Unreleased
+## 0.3.0
 
 `generateObject` asks models outside Anthropic for the object through a tool. In 0.2.0 it sent them `outputConfig.textFormat`, which Nova, Mistral Large 2402, Pixtral Large, Llama, and Palmyra answered with a 400 in probes in `eu-west-1` and `us-east-1`, so `generateObject` on these models failed unless you set `structuredOutputs: false`.
 
