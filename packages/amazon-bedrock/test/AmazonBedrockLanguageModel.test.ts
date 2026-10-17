@@ -1439,7 +1439,7 @@ describe("AmazonBedrockLanguageModel", () => {
           assert.deepStrictEqual(result.value, { answer: 4 })
           const body = yield* getRequestBody(captured!)
           assert.isUndefined(body.outputConfig)
-          assert.deepStrictEqual(body.toolConfig.toolChoice, { tool: { name: "Answer" } })
+          assert.deepStrictEqual(body.toolConfig.toolChoice, { any: {} })
         }))
       it.effect("emits only the first object when the model calls the object tool twice", () =>
         Effect.gen(function*() {
@@ -1527,7 +1527,7 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.deepStrictEqual(bodies[0].system, [{
           text: "Respond only by calling the `result` tool. Do not answer in text."
         }])
-        assert.deepStrictEqual(bodies[1].toolConfig.toolChoice, { tool: { name: "result" } })
+        assert.deepStrictEqual(bodies[1].toolConfig.toolChoice, { any: {} })
         assert.deepStrictEqual(bodies[1].system, [])
         for (const body of bodies) {
           assert.notProperty(body, "forcedToolChoice")
@@ -1674,7 +1674,7 @@ describe("AmazonBedrockLanguageModel", () => {
     // generateObject asks for the object through the tool on every model.
     for (
       const { model, toolChoice } of [
-        { model: "us.test.model-v1:0", toolChoice: { tool: { name: "result" } } },
+        { model: "us.test.model-v1:0", toolChoice: { any: {} } },
         { model: "eu.anthropic.claude-opus-5-5", toolChoice: { auto: {} } }
       ]
     ) {
