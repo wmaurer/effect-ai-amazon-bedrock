@@ -235,7 +235,7 @@ To set request defaults, give them as the second argument of `model` or as the `
 
 - `inferenceConfig`, `additionalModelRequestFields`, and `toolConfig`. The provider sends each one as the Converse request field of the same name.
 - `outputConfig`, which takes only `effort`. The provider sets `outputConfig.textFormat` itself. `effort` is `low`, `medium`, `high`, `xhigh`, or `max`, and a higher level lets the model reason longer before it answers. The Bedrock Runtime API model documents that the level is capped at `high` when extended thinking is off. Not every model takes `effort`. On 2026-10-17 Bedrock rejected it for Claude Sonnet 4.5 and Haiku 4.5 with `This model doesn't support the effort field`.
-- `structuredOutputs` and `forcedToolChoice`, which choose how `generateObject` asks for the object. The provider does not send them to Bedrock. [Get structured output](#get-structured-output) explains them.
+- `structuredOutputs` and `forcedToolChoice`, which override how `generateObject` asks for the object on the model you chose. The provider does not send them to Bedrock. [Get structured output](#get-structured-output) explains them.
 
 When `generateObject` asks for the object through a tool, that tool replaces your `toolConfig`. Any other request with tools replaces it with a `toolConfig` built from those tools, unless `toolChoice` is `"none"`. With no tools, or with `toolChoice` set to `"none"`, the provider sends your `toolConfig` unchanged.
 
@@ -284,22 +284,35 @@ export const adaptiveAnswer = LanguageModel.generateText({
 
 ## Get structured output
 
-`LanguageModel.generateText`, `LanguageModel.streamText`, and `LanguageModel.generateObject` all work with this provider. By default, `generateObject` sends the schema in the Converse `outputConfig.textFormat` field, and the tools you pass go with it. The provider converts the schema with the rules for Anthropic models.
+`LanguageModel.generateText`, `LanguageModel.streamText`, and `LanguageModel.generateObject` all work with this provider. `generateObject` asks for the object in one of three ways, and the provider that the model ID names decides which:
 
-A probe on 2026-10-17 sent one Converse request per path to 17 Claude inference profiles through the `eu-west-1` endpoint. Every profile that served the probe's requests, 12 of the 17, accepted `outputConfig.textFormat`: Claude Haiku 4.5 and 5.5, Opus 4.5, 4.6, 4.7, 4.8, 5, and 5.5, and Sonnet 4.5, 4.6, 5, and 5.5. On Opus 4.8, Opus 5.5, and Sonnet 5.5 it also accepted `outputConfig.textFormat` together with `effort`, with adaptive thinking, and next to a strict tool. Fable 5 and 5.1 rejected every request, with or without `outputConfig.textFormat`, with `data retention mode 'default' is not available for this model`, and the other three profiles have reached end of life.
+- A Claude model gets the schema in the Converse `outputConfig.textFormat` field, and the tools you pass go with it.
+- A Meta or Writer model gets the schema as a tool that it is not forced to call, and the provider adds a system prompt line that tells the model to call it.
+- A model of any other provider, such as Amazon Nova, Mistral, OpenAI, or Qwen, gets the schema as a tool that `toolChoice` `{ any: {} }` forces it to call.
 
-The provider keeps a list of models that get the schema as a tool instead: the Claude 3 models and Claude Sonnet 4 and Opus 4. The list comes from Anthropic's table of models with structured output. The probe could not check it on Bedrock. Claude 3 Haiku, Claude 3 Sonnet, and Sonnet 4 have reached end of life in `eu-west-1`, and the probe did not try the other models on the list. The tool replaces the tools you pass, and the tool's input becomes the object. If the model calls the tool more than once, the first call is the object. If the model answers in text instead of calling the tool, `effect/ai` decodes the text as the object.
+The provider is the first part of the model ID, or the second part after a geo prefix: `anthropic` in `eu.anthropic.claude-opus-4-8`, `amazon` in `amazon.nova-pro-v1:0`. A foundation model ARN or an inference profile ARN names its model at the end. The tool replaces the tools you pass, and the tool's input becomes the object. If the model calls the tool more than once, the first call is the object. If the model answers in text instead of calling the tool, `effect/ai` decodes the text as the object. On every path, the provider converts the schema with the rules for Anthropic models.
 
-On the tool path the provider forces the model to call the tool. In the probe, Claude Opus 5.5 and Sonnet 5.5 rejected a forced `toolChoice` with `tool_choice: type "tool" and "any" are not supported for this model`. The provider also treats Fable 5.1 and Mythos 5.1 as rejecting it, which nobody has checked on Bedrock. For these four models the provider leaves the tool unforced and adds a system prompt line that tells the model to call it. They take the tool path only when `structuredOutputs` is `false`, or when the prompt holds tool calls and no tools go out.
+Probes on 2026-10-17 sent one Converse request per model and path through the `eu-west-1` and `us-east-1` endpoints. Of the models outside Anthropic:
+
+- The models that answered `outputConfig` with a 400 include Nova, Mistral Large 2402, Pixtral Large, Llama, and Palmyra. gpt-oss-120b accepted it, but wrote text before the JSON in 3 of 4 runs.
+- The tool forced with `any` returned the object on 13 of the 14 models in `eu-west-1`, and on every one of the 17 models in `us-east-1` that accept a forced tool. Mistral Large 2402 and Pixtral Large answer a named tool in `toolChoice` with a 400, and Gemma 3 27B ignores it, but all three accept `any`.
+- Llama 3.1, 3.3, and 4 and Palmyra X4 and X5 answered `any` with a 400. The unforced tool returned the object on Llama 3.1 8B, Llama 4 Scout, Llama 4 Maverick, and Palmyra X5, and a wrong object on Llama 3.1 70B and Llama 3.3 70B.
+- No path returned the object on Magistral Small. Llama 3 70B, Mistral 7B, Mixtral 8x7B, and DeepSeek R1 reject tool use and `outputConfig`, so `generateObject` does not work on them.
+
+A probe on the same day sent one request per path to 17 Claude inference profiles through the `eu-west-1` endpoint. Every profile that served the probe's requests, 12 of the 17, accepted `outputConfig.textFormat`: Claude Haiku 4.5 and 5.5, Opus 4.5, 4.6, 4.7, 4.8, 5, and 5.5, and Sonnet 4.5, 4.6, 5, and 5.5. On Opus 4.8, Opus 5.5, and Sonnet 5.5 it also accepted `outputConfig.textFormat` together with `effort`, with adaptive thinking, and next to a strict tool. Fable 5 and 5.1 rejected every request, with or without `outputConfig.textFormat`, with `data retention mode 'default' is not available for this model`, and the other three profiles have reached end of life.
+
+The provider keeps a list of Claude models that get the forced tool instead: the Claude 3 models and Claude Sonnet 4 and Opus 4. The list comes from Anthropic's table of models with structured output. The probe could not check it on Bedrock. Claude 3 Haiku, Claude 3 Sonnet, and Sonnet 4 have reached end of life in `eu-west-1`, and the probe did not try the other models on the list.
+
+In the probe, Claude Opus 5.5 and Sonnet 5.5 rejected a forced `toolChoice` with `tool_choice: type "tool" and "any" are not supported for this model`. The provider also treats Fable 5.1 and Mythos 5.1 as rejecting it, which nobody has checked on Bedrock. For these four models the provider leaves the tool unforced and adds the system prompt line. They take the tool path only when `structuredOutputs` is `false`, or when the prompt holds tool calls and no tools go out.
 
 When the prompt holds tool calls or tool results and the request offers no tools, `generateObject` uses the tool on every model, even with `structuredOutputs: true`. Converse rejects such a request unless it carries a `toolConfig`, and the object tool is one.
 
-The provider matches the model ID against its lists. Two config fields override the match, and the provider sends neither to Bedrock:
+Two config fields override what the model ID decides, and the provider sends neither to Bedrock:
 
 - `structuredOutputs` set to `true` sends `outputConfig.textFormat` to any model, except when the prompt holds tool calls and no tools go out. Set to `false`, it sends the tool.
 - `forcedToolChoice` set to `true` forces the tool, and set to `false` leaves it unforced. It has an effect only on the tool path. It does not change a `toolChoice` you pass with your own tools: `"required"` and a named tool go to Bedrock as `any` and `tool`, and the probe's error from Opus 5.5 and Sonnet 5.5 names both as unsupported.
 
-A model ID that does not name the model, such as an application inference profile ARN, gets `outputConfig.textFormat`, or a forced tool when `structuredOutputs` is `false`. With tool history and no tools it also gets a forced tool by default. Behind an ARN that wraps Opus 5.5 or Sonnet 5.5, set `forcedToolChoice: false` for that case. To send the unforced tool through such an ARN in every case, set both fields:
+A model ID that does not name the model, such as an application inference profile ARN, gets what a Claude model gets: `outputConfig.textFormat`, or a forced tool when `structuredOutputs` is `false`. With tool history and no tools it also gets a forced tool by default. Behind an ARN that wraps Opus 5.5 or Sonnet 5.5, set `forcedToolChoice: false` for that case. Behind an ARN that wraps a model of another provider, set `structuredOutputs: false`, and also `forcedToolChoice: false` for a Meta or Writer model. To send the unforced tool through such an ARN in every case, set both fields:
 
 ```ts
 import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"

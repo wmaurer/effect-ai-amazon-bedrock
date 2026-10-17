@@ -1,5 +1,13 @@
 # @wmaurer/effect-ai-amazon-bedrock
 
+## Unreleased
+
+`generateObject` asks models outside Anthropic for the object through a tool. In 0.2.0 it sent them `outputConfig.textFormat`, which Nova, Mistral Large 2402, Pixtral Large, Llama, and Palmyra answered with a 400 in probes in `eu-west-1` and `us-east-1`, so `generateObject` on these models failed unless you set `structuredOutputs: false`.
+
+- Choose how `generateObject` asks for the object from the provider that the model ID names. Claude models keep the 0.2.0 behavior. Meta and Writer models get the object tool unforced, with a system prompt line that tells the model to call it, because Llama and Palmyra reject a forced `toolChoice`. Models of every other provider get the forced object tool. An ARN that does not name its model, such as an application inference profile, keeps the 0.2.0 behavior. `Config.structuredOutputs` and `Config.forcedToolChoice` still override the choice.
+- Force the object tool with `toolChoice` `{ any: {} }` in place of `{ tool: { name } }`. The object tool is the only tool in its request, so both force it, and Mistral Large 2402 and Pixtral Large accept only `any`. A `toolChoice` that you pass with your own tools goes to Bedrock as before.
+- Fail `streamText` with an `AiError` whose reason is `InvalidOutputError` when Bedrock streams tool input that is not valid JSON. In 0.2.0 the stream died with a defect. Bedrock streamed such input for Qwen3 32B in each probe run.
+
 ## 0.2.0
 
 `AmazonBedrockClient.layer`, `layerConfig`, and `make` take one of three ways to authenticate: the fixed keys of 0.1.0, a `credentialProvider`, or a Bedrock `apiKey`. Options that mix two ways, or give none, do not compile. Every 0.1.0 call compiles and runs unchanged.

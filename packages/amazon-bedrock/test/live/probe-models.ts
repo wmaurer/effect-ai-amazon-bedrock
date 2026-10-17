@@ -1,16 +1,16 @@
 /**
  * Probes which calls each Bedrock model accepts through this provider, and prints one row per
- * model and call. It makes real Bedrock calls, five per model, so it costs money.
+ * model and call. It makes real Bedrock calls, six per model, so it costs money.
  *
  * Run it from the repository root with the model IDs as arguments:
  *
  *   node packages/amazon-bedrock/test/live/probe-models.ts eu.amazon.nova-pro-v1:0 mistral.mistral-large-2402-v1:0
  *
- * The calls are the ones `docs/TODO.md` names for models from other providers: `text` is a
- * plain `generateText`, `stream-tool` is a `streamText` that should call a tool, and the three
- * `object-*` rows are `generateObject` on each path `getModelCapabilities` can pick: `native`
- * sends `outputConfig.textFormat`, `forced` sends an object tool with `toolChoice.tool`, and
- * `unforced` sends it with `toolChoice.auto`.
+ * `text` is a plain `generateText`, `stream-tool` is a `streamText` that should call a tool,
+ * `tool-any` is a `generateText` with `toolChoice: "required"`, and the three `object-*` rows are
+ * `generateObject` on each path `getModelCapabilities` can pick: `native` sends
+ * `outputConfig.textFormat`, `forced` sends an object tool with `toolChoice.any`, and `unforced`
+ * sends it with `toolChoice.auto`.
  */
 import { AmazonBedrockClient, AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
 import { Cause, Duration, Effect, Layer, Redacted, Schema, Stream } from "effect"

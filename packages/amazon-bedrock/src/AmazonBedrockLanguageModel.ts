@@ -554,11 +554,15 @@ export class Config extends Context.Service<
        *
        * **Details**
        *
-       * Overrides automatic capability detection based on the model
-       * identifier. When `false`, `generateObject` asks for the object through
-       * a tool instead, which is forced on models that accept a forced
-       * `toolChoice` and left unforced, with an instruction to call it, on
-       * models that do not. Never sent to Bedrock.
+       * Overrides the default for the provider that the model identifier
+       * names. By default only Claude models, and ARNs that do not name their
+       * model, get native structured output. In probes on 2026-10-17 in
+       * eu-west-1 and us-east-1, Nova, Mistral Large 2402, Pixtral Large,
+       * Llama, and Palmyra answered `outputConfig` with a 400. When `false`,
+       * `generateObject` asks for the object through a tool instead, which is
+       * forced on models that accept a forced `toolChoice` and left unforced,
+       * with an instruction to call it, on models that do not. Never sent to
+       * Bedrock.
        *
        * When the prompt holds tool calls or tool results and the request
        * offers no tools, `generateObject` uses the tool even when this is
@@ -571,12 +575,19 @@ export class Config extends Context.Service<
        *
        * **Details**
        *
-       * Overrides automatic capability detection based on the model
-       * identifier. It decides whether the tool that `generateObject` uses
-       * without native structured output is forced, so with
-       * `structuredOutputs: false` it selects between the forced and the
-       * unforced tool, for example for an application inference profile ARN,
-       * which does not name its model. Never sent to Bedrock.
+       * Overrides the default for the provider that the model identifier
+       * names. It decides whether the tool that `generateObject` uses
+       * without native structured output is forced with `toolChoice`
+       * `{ any: {} }`, so with `structuredOutputs: false` it selects between
+       * the forced and the unforced tool, for example for an application
+       * inference profile ARN, which does not name its model. Never sent to
+       * Bedrock.
+       *
+       * By default Meta and Writer models, and Claude Opus 5.5, Sonnet 5.5,
+       * Fable 5.1, and Mythos 5.1, get the unforced tool. In probes on
+       * 2026-10-17 in us-east-1, Llama 3.1, 3.3, and 4 and Palmyra X4 and X5
+       * answered `any` with a 400, and in eu-west-1 Opus 5.5 and Sonnet 5.5
+       * rejected both `any` and a named `tool`.
        *
        * It steers only that tool. A `toolChoice` passed with the caller's own
        * tools, such as `"required"` or a named tool, goes to Bedrock
@@ -674,11 +685,9 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
             }
           }
         } else {
-          // The object is asked for through a tool, which replaces the
-          // caller's tools. It is the only tool, so `any` forces it, and
+          // The object tool is the only tool, so `any` forces it, and
           // Mistral Large 2402 and Pixtral Large accept `any` but reject a
-          // named `tool`. A model that rejects a forced `toolChoice` gets the
-          // tool unforced, and the request says to call it.
+          // named `tool`.
           const forced = forcedToolChoice ?? capabilities.supportsForcedToolChoice
           nameMapper = new Tool.NameMapper([])
           toolConfig = {
@@ -1147,8 +1156,9 @@ interface ModelCapabilities {
  *   fails every object path.
  * - Llama 3.1, 3.3 and 4 and Palmyra X4 and X5 (`meta`, `writer`) answer
  *   `any` with a 400 in us-east-1, and so does each of them that the probe
- *   sent a named `tool`, all but Llama 3.1 8B. They get the unforced tool. It returned the object on Llama 3.1 8B, Llama 4 Scout and Maverick
- *   and Palmyra X5, and a wrong object on Llama 3.1 70B and 3.3 70B.
+ *   sent a named `tool`, all but Llama 3.1 8B. They get the unforced tool. It
+ *   returned the object on Llama 3.1 8B, Llama 4 Scout and Maverick and
+ *   Palmyra X5, and a wrong object on Llama 3.1 70B and 3.3 70B.
  * - Claude models before Opus 4.1 / Sonnet 4.5 predate structured output, as
  *   in the Anthropic provider. This is not checked on Bedrock: a probe of 17
  *   Claude inference profiles in eu-west-1 found Claude 3 Haiku, Claude 3

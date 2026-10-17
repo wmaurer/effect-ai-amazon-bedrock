@@ -25,30 +25,54 @@ The design and the reasons for these choices are in
 
 ## Models from other providers
 
-Every live call so far has gone to a Claude model. The live suites default to Claude Sonnet 4.5
-and Opus 5.5, and the structured-output probe sent only Claude inference profiles. Nova, Llama,
-Mistral, DeepSeek, and the other providers on Bedrock are untested. `generateText`, `streamText`,
-and tool calls use the shape Converse shares across models, so they are the most likely to work.
-These parts of the provider assume a Claude model:
+`packages/amazon-bedrock/test/live/probe-models.ts` called models from other providers on
+2026-10-17: 15 through the `eu-west-1` endpoint and 32 through `us-east-1`, with one run per
+model and call unless noted. Most models got a `generateText`, a `streamText` that should call a
+tool, a `generateText` with `toolChoice: "required"`, and `generateObject` on each of its three
+paths. `getModelCapabilities` follows what the probe saw for `generateObject`, and "How
+`generateObject` chooses its path" below gives the rule. These findings and gaps remain:
 
-- `getModelCapabilities` gives `outputConfig.textFormat` to every model ID it does not name, so
-  `generateObject` on another provider's model takes the native path by default. Whether Bedrock
-  accepts `outputConfig.textFormat` for those models is unchecked. If it does not, the default
-  `generateObject` fails with a 400 until the caller sets `structuredOutputs: false`.
-- On the tool path, `getModelCapabilities` treats every model it does not name as accepting a
-  forced `toolChoice`. The Smithy model documents `ToolChoice.tool` as "Only supported by
-  Anthropic Claude 3 and Amazon Nova models", so `structuredOutputs: false` likely fails on Llama,
-  Mistral, and the others. `forcedToolChoice: false` would avoid it.
+- Bedrock streamed the tool input of Qwen3 32B as `city": "Zurich"}`, without the opening `{"`,
+  in each of 4 runs. Its non-streaming tool input was intact. The provider now fails the stream
+  with an `InvalidOutputError`. It does not repair the input.
+- Mistral Large 2402 and Pixtral Large in `eu-west-1`, and Llama 3 70B, Llama 3.3 70B, Llama 4
+  Maverick, Palmyra X5, DeepSeek R1, Mistral 7B, Mixtral 8x7B, and Mistral Small 2402 in
+  `us-east-1`, answer a `streamText` with tools with `This model doesn't support tool use in
+  streaming mode`. Mistral Large 3, Devstral 2, and Ministral 3 8B stream tool calls.
+- Gemma 3 27B, Gemma 3 12B, and Magistral Small make no tool call in `streamText`. They answer
+  in text.
+- Magistral Small returns no valid JSON on any `generateObject` path, and makes no tool call
+  with `toolChoice: "required"`.
+- Llama 3 70B, Mistral 7B, Mixtral 8x7B, and DeepSeek R1 answer a request with tools with
+  `This model doesn't support tool use`. They answer `outputConfig` with a 400 too, so
+  `generateObject` has no path on them. Mistral 7B and Mixtral 8x7B also reject the system prompt line of the unforced
+  tool.
+- gpt-oss-120b accepts `outputConfig.textFormat`, but wrote text before the JSON in 3 of 4
+  runs. DeepSeek V3.2 and Mistral Large 3 accepted it in `us-east-1`. The provider sends neither
+  of them `outputConfig.textFormat`, and a caller can set `structuredOutputs: true`.
+- The unforced tool on Llama 3.1 70B and Llama 3.3 70B returned an object that does not match
+  the schema.
+- vercel-ai's `normalize-tool-call-id.ts` says that Mistral models need tool call IDs that match
+  `^[a-zA-Z0-9]{9}$`, and rewrites the `tooluse_...` IDs that Bedrock generates. The provider
+  sends the IDs unchanged. The probe made one tool call per request and sent no tool result
+  back, so it did not test this.
+- vercel-ai's `amazon-bedrock-chat-language-model.ts` drops `stopSequences` for OpenAI models,
+  and `temperature` and `topP` for the ones other than gpt-oss. Its comment says that Converse
+  rejects them. The provider sends `inferenceConfig` as given, and the probe did not set these
+  fields, so this is unverified.
+- Llama 3.2 3B in `eu-west-1`, and Nova Premier, Llama 3.2 11B, and Llama 3.2 90B in
+  `us-east-1`, have reached end of life. Bedrock denied the probe's account access to Palmyra X4,
+  which Writer marks as Legacy, and to GLM 5.3.
 - Tool input schemas and the `outputConfig.textFormat` schema are converted with
-  `toCodecAnthropic` for every model.
-- Reasoning has been seen only from Claude, always with a `signature` or `redactedContent`.
-  Reasoning from DeepSeek R1 and similar models has no signature. The schema makes `signature`
-  optional, so it should decode, but no live run has shown it.
+  `toCodecAnthropic` for every model. The probe's schemas were small objects of strings and
+  booleans.
+- gpt-5.5, gpt-oss, grok, MiniMax, Kimi K3, and DeepSeek R1 returned reasoning, and the
+  provider decoded it into reasoning parts. No test sends their reasoning back in a later turn.
+- Only `eu-west-1` and `us-east-1` are probed.
 
 The live suites cannot settle this as they stand. `BEDROCK_MODEL_ID` changes the model, but the
 cache, citation, and reasoning tests check Claude behaviour and would fail on other models for
-that reason alone. A probe with one `generateText`, one `streamText` with a tool call, and one
-`generateObject` per model would cover the list above.
+that reason alone. Run `probe-models.ts` for the model instead.
 
 ## Unknown stop reasons
 
@@ -106,17 +130,41 @@ no other change.
 `getModelCapabilities` in `AmazonBedrockLanguageModel.ts` reads the model ID and decides between
 native `outputConfig.textFormat`, a forced object tool, and an unforced one.
 `Config.structuredOutputs` and `Config.forcedToolChoice` override each decision, and a prompt
-that holds tool calls while no tools go out takes the object tool on every model. A probe on
-2026-10-17 sent one Converse request per path to 17 Claude inference profiles through the
-`eu-west-1` endpoint, and the rule follows what it saw. These parts of the rule it could not check:
+that holds tool calls while no tools go out takes the object tool on every model. The forced tool
+goes out with `toolChoice` `{ any: {} }`.
 
-- The models without native structured output, which are the Claude 3 models and Claude Sonnet 4
-  and Opus 4, come from Anthropic's table. Claude 3 Haiku, Claude 3 Sonnet, and Sonnet 4 have
-  reached end of life in `eu-west-1`, and the probe did not try the others.
+The decision comes from `capabilitiesByProvider`, a table keyed by the provider that the model ID
+names. The provider is the first dot-separated part of the ID, or the second when the first is a
+geo prefix such as `eu` or `global`. A foundation model ARN or an inference profile ARN names its
+model after the `/`. The table has these rows:
+
+- `anthropic` gets native structured output, except the Claude 3 models and Claude Sonnet 4 and
+  Opus 4, which get the forced tool. Opus 5.5, Sonnet 5.5, Fable 5.1, and Mythos 5.1 get the
+  unforced tool when they take the tool path.
+- `meta` and `writer` get the unforced tool.
+- Any other provider gets the forced tool.
+- An ARN that does not name its model, such as an application inference profile, a provisioned
+  model, or a prompt router, gets native structured output and the forced tool, as every model
+  did in 0.2.0.
+
+Probes on 2026-10-17 sent one Converse request per path to 17 Claude inference profiles through
+the `eu-west-1` endpoint, and to the models of other providers that "Models from other providers"
+lists. The rows follow what they saw. These parts of the rule they could not check:
+
+- The Claude models without native structured output come from Anthropic's table. Claude 3
+  Haiku, Claude 3 Sonnet, and Sonnet 4 have reached end of life in `eu-west-1`, and the probe did
+  not try the others.
 - Fable 5.1 and Mythos 5.1 are treated as rejecting a forced `toolChoice`, as Opus 5.5 and Sonnet
   5.5 did in the probe. Nobody has checked them on Bedrock.
-- Every model ID the rule does not name gets `outputConfig.textFormat`, including the models of
-  other providers on Bedrock. The probe sent only Claude models.
+- The `meta` and `writer` rows rest on Llama 3.1, 3.3, and 4 and Palmyra X4 and X5 in
+  `us-east-1`. A newer model from either provider may accept a forced tool and still get the
+  unforced one.
+- The row for other providers sends no model `outputConfig.textFormat`, though gpt-5.5, grok,
+  Gemma 3 27B, MiniMax, Nemotron, Qwen3 32B, GLM 4.7 Flash, DeepSeek V3.2, and Mistral Large 3
+  accepted it. The forced tool returned the object on each of them.
+- The row for unnamed ARNs assumes that most of them wrap a Claude model. An ARN that wraps Nova,
+  Llama, or another model that rejects `outputConfig` gets a 400 from `generateObject` until the
+  caller sets `structuredOutputs: false`.
 
 ## Fable 5 and 5.1 reject every request
 
@@ -235,10 +283,12 @@ model that misbehaves on demand. `generateObject` sends one of three request sha
 suite has a check for two of them, which has not run since Opus 5.5 moved to the native path:
 native `outputConfig.textFormat` on Sonnet 4.5 and Opus 5.5, and an unforced `{ auto: {} }` object
 tool on Opus 5.5 with `structuredOutputs: false`, since Opus 5.5 rejects a forced `toolChoice` on
-Bedrock. The third, a forced `{ tool: { name } }` object tool, is stub-only. The provider sends it
-to the models that `getModelCapabilities` lists as lacking native structured output, which are the
-Claude 3 models and Claude Sonnet 4 and Opus 4 but not Opus 4.1, unless `Config.forcedToolChoice`
-is `false`. With `structuredOutputs: false` it also sends it to every model that
+Bedrock. The third, a forced `{ any: {} }` object tool, has run live only through
+`probe-models.ts`, on Claude Haiku 4.5 and Opus 4.8 and on the models of other providers. No live
+suite checks it. The provider sends it to the models of providers other than Anthropic, Meta, and
+Writer, and to the Claude models that `getModelCapabilities` lists as lacking native structured
+output, which are the Claude 3 models and Claude Sonnet 4 and Opus 4 but not Opus 4.1, unless
+`Config.forcedToolChoice` is `false`. With `structuredOutputs: false` it also sends it to every model that
 `getModelCapabilities` or `Config.forcedToolChoice` says accepts a forced `toolChoice`. The same
 models, the default Sonnet 4.5, Opus 4.8 and Sonnet 5 among them, get it when the prompt holds tool
 calls and no tools go out. No live run covers that fallback. Anthropic rejects a forced
@@ -246,7 +296,8 @@ tool while budget thinking (`thinking.type: "enabled"`) is on, which the AI SDK'
 provider accounts for (`packages/anthropic/src/anthropic-language-model.ts` in `vercel/ai` treats
 `thinkingType === 'enabled'` as rejecting forced tool use). So an agent loop that runs with budget
 thinking may get a 400 on the fallback; `forcedToolChoice: false` avoids it. The provider does not
-detect this case. The `{ any: {} }` tool choice is stub-only too. Image and document `s3Location` sources are untested — they
+detect this case. The `{ any: {} }` that `toolChoice: "required"` sends with the caller's tools
+has also run live only through `probe-models.ts`. Image and document `s3Location` sources are untested — they
 need a bucket and objects to point at. The 429 -> `RateLimitError` mapping has been seen
 in practice (it is why `--no-file-parallelism` exists) but is asserted nowhere, since
 provoking it means deliberately exceeding the account's token quota.
