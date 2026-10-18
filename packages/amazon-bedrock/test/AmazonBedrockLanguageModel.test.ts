@@ -48,9 +48,10 @@ const layersFor = (
   handler: (
     request: HttpClientRequest.HttpClientRequest
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>,
-  model = "us.test.model-v1:0"
+  model = "us.test.model-v1:0",
+  config?: Omit<typeof AmazonBedrockLanguageModel.Config.Service, "modelId">
 ) =>
-  AmazonBedrockLanguageModel.layer({ model }).pipe(
+  AmazonBedrockLanguageModel.layer({ model, config }).pipe(
     Layer.provide(AmazonBedrockClient.layer({
       accessKeyId: "AKIA_TEST",
       secretAccessKey: Redacted.make("test-secret"),
@@ -2428,6 +2429,110 @@ describe("AmazonBedrockLanguageModel", () => {
 
         const body = yield* getRequestBody(captured!)
         assert.notProperty(body, "additionalModelRequestFields")
+      }))
+  })
+
+  describe("guardrailConfig", () => {
+    const streamGuardrail = {
+      guardrailIdentifier: "gr-layer",
+      guardrailVersion: "DRAFT",
+      trace: "enabled",
+      streamProcessingMode: "async"
+    } as const
+    const converseHandler =
+      (captured: Array<HttpClientRequest.HttpClientRequest>) => (request: HttpClientRequest.HttpClientRequest) => {
+        captured.push(request)
+        return Effect.succeed(jsonResponse(request, {
+          output: { message: { role: "assistant", content: [{ text: "Hi" }] } },
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+          stopReason: "end_turn"
+        }))
+      }
+    const streamHandler =
+      (captured: Array<HttpClientRequest.HttpClientRequest>) => (request: HttpClientRequest.HttpClientRequest) => {
+        captured.push(request)
+        return Effect.succeed(binaryResponse(request, concat(happyPathFrames)))
+      }
+
+    it.effect("sends the guardrail to Converse without streamProcessingMode", () =>
+      Effect.gen(function*() {
+        const captured: Array<HttpClientRequest.HttpClientRequest> = []
+        yield* LanguageModel.generateText({ prompt: "Hello" }).pipe(
+          Effect.provide(layersFor(converseHandler(captured), undefined, { guardrailConfig: streamGuardrail }))
+        )
+
+        assert.strictEqual(captured[0]!.url.endsWith("/converse"), true)
+        const body = yield* getRequestBody(captured[0]!)
+        assert.deepStrictEqual(body.guardrailConfig, {
+          guardrailIdentifier: "gr-layer",
+          guardrailVersion: "DRAFT",
+          trace: "enabled"
+        })
+      }))
+
+    it.effect("sends the guardrail to converse-stream with streamProcessingMode", () =>
+      Effect.gen(function*() {
+        const captured: Array<HttpClientRequest.HttpClientRequest> = []
+        yield* LanguageModel.streamText({ prompt: "Hello" }).pipe(
+          Stream.runDrain,
+          Effect.provide(layersFor(streamHandler(captured), undefined, { guardrailConfig: streamGuardrail }))
+        )
+
+        assert.strictEqual(captured[0]!.url.endsWith("/converse-stream"), true)
+        const body = yield* getRequestBody(captured[0]!)
+        assert.deepStrictEqual(body.guardrailConfig, {
+          guardrailIdentifier: "gr-layer",
+          guardrailVersion: "DRAFT",
+          trace: "enabled",
+          streamProcessingMode: "async"
+        })
+      }))
+
+    it.effect("omits the key on both paths when no guardrail is configured", () =>
+      Effect.gen(function*() {
+        const captured: Array<HttpClientRequest.HttpClientRequest> = []
+        yield* LanguageModel.generateText({ prompt: "Hello" }).pipe(
+          Effect.provide(layersFor(converseHandler(captured)))
+        )
+        yield* LanguageModel.streamText({ prompt: "Hello" }).pipe(
+          Stream.runDrain,
+          Effect.provide(layersFor(streamHandler(captured)))
+        )
+
+        assert.notProperty(yield* getRequestBody(captured[0]!), "guardrailConfig")
+        assert.notProperty(yield* getRequestBody(captured[1]!), "guardrailConfig")
+      }))
+
+    it.effect("turns off the layer's guardrail with an undefined override", () =>
+      Effect.gen(function*() {
+        const captured: Array<HttpClientRequest.HttpClientRequest> = []
+        yield* LanguageModel.generateText({ prompt: "Hello" }).pipe(
+          AmazonBedrockLanguageModel.withConfigOverride({ guardrailConfig: undefined }),
+          Effect.provide(layersFor(converseHandler(captured), undefined, { guardrailConfig: streamGuardrail }))
+        )
+        yield* LanguageModel.streamText({ prompt: "Hello" }).pipe(
+          Stream.runDrain,
+          AmazonBedrockLanguageModel.withConfigOverride({ guardrailConfig: undefined }),
+          Effect.provide(layersFor(streamHandler(captured), undefined, { guardrailConfig: streamGuardrail }))
+        )
+
+        assert.notProperty(yield* getRequestBody(captured[0]!), "guardrailConfig")
+        assert.notProperty(yield* getRequestBody(captured[1]!), "guardrailConfig")
+      }))
+
+    it.effect("replaces the whole guardrail of the layer with an override", () =>
+      Effect.gen(function*() {
+        const captured: Array<HttpClientRequest.HttpClientRequest> = []
+        yield* LanguageModel.streamText({ prompt: "Hello" }).pipe(
+          Stream.runDrain,
+          AmazonBedrockLanguageModel.withConfigOverride({
+            guardrailConfig: { guardrailIdentifier: "gr-override", guardrailVersion: "2" }
+          }),
+          Effect.provide(layersFor(streamHandler(captured), undefined, { guardrailConfig: streamGuardrail }))
+        )
+
+        const body = yield* getRequestBody(captured[0]!)
+        assert.deepStrictEqual(body.guardrailConfig, { guardrailIdentifier: "gr-override", guardrailVersion: "2" })
       }))
   })
 })

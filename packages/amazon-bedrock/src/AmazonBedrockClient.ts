@@ -31,7 +31,7 @@ import type * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import { AmazonBedrockConfig } from "./AmazonBedrockConfig.ts"
 import * as EventStream from "./AmazonBedrockEventStream.ts"
-import type { ConverseRequest } from "./AmazonBedrockSchema.ts"
+import type { ConverseRequest, ConverseStreamRequest } from "./AmazonBedrockSchema.ts"
 import { ConverseResponse, ConverseResponseStreamEvent } from "./AmazonBedrockSchema.ts"
 import * as Authentication from "./internal/credentials.ts"
 import * as Errors from "./internal/errors.ts"
@@ -62,7 +62,7 @@ export interface Service {
    * all errors to the unified `AiError` type.
    */
   readonly converseStream: (options: {
-    readonly payload: typeof ConverseRequest.Encoded
+    readonly payload: typeof ConverseStreamRequest.Encoded
   }) => Stream.Stream<ConverseResponseStreamEvent, AiError.AiError>
 }
 

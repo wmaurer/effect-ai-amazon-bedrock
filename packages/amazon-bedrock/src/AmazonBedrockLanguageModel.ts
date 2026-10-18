@@ -54,8 +54,10 @@ import type {
   ConverseRequest,
   ConverseResponse,
   ConverseResponseStreamEvent,
+  ConverseStreamRequest,
   DocumentBlock,
   DocumentSource,
+  GuardrailStreamConfiguration,
   ImageBlock,
   MediaSource,
   Message,
@@ -494,16 +496,41 @@ const reasoningTextInfo = (signature: string | undefined): ReasoningInfo => ({
 // =============================================================================
 
 /**
+ * A guardrail to apply to every request, set as `Config.guardrailConfig`.
+ *
+ * **Details**
+ *
+ * `generateText` and `generateObject` send it to Converse without
+ * `streamProcessingMode`, which Converse does not have. `streamText` sends it
+ * to ConverseStream as given.
+ *
+ * Without `guardContent` on any part, the guardrail evaluates every message
+ * and not the system prompt. Set `trace` to `"enabled"` to learn from the
+ * finish part whether the guardrail blocked or masked. The trace holds the
+ * matched text unmasked.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.4.0
+ */
+export type GuardrailConfig = typeof GuardrailStreamConfiguration.Encoded
+
+/**
  * Per-request configuration for the Amazon Bedrock language model.
  *
  * **Details**
  *
- * Derived from `ConverseRequest`, minus the fields built from the prompt, so
- * every Converse request parameter is settable per request. That includes
- * `additionalModelRequestFields`, which carries inference parameters specific
- * to the target model — among them extended thinking on Anthropic models. The
- * thinking budget is drawn from the same ceiling as the visible answer, so
- * `inferenceConfig.maxTokens` must exceed `budget_tokens`.
+ * Derived from `ConverseStreamRequest`, minus the fields built from the
+ * prompt, so every Converse request parameter is settable per request. That
+ * includes `additionalModelRequestFields`, which carries inference parameters
+ * specific to the target model — among them extended thinking on Anthropic
+ * models. The thinking budget is drawn from the same ceiling as the visible
+ * answer, so `inferenceConfig.maxTokens` must exceed `budget_tokens`.
+ *
+ * It also includes `guardrailConfig` (see {@link GuardrailConfig}). An
+ * override replaces the whole object, and `guardrailConfig: undefined` turns
+ * off a layer's guardrail for one request. `generateText` does not send
+ * `streamProcessingMode`.
  *
  * **Example** (Enabling extended thinking for one request)
  *
@@ -532,7 +559,7 @@ export class Config extends Context.Service<
   Simplify<
     & Partial<
       Omit<
-        typeof ConverseRequest.Encoded,
+        typeof ConverseStreamRequest.Encoded,
         "messages" | "system" | "outputConfig"
       >
     >
@@ -635,7 +662,7 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
     function*(
       options: LanguageModel.ProviderOptions
     ): Effect.fn.Return<{
-      readonly request: typeof ConverseRequest.Encoded
+      readonly request: typeof ConverseStreamRequest.Encoded
       readonly nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>
       readonly documents: ReadonlyArray<CitedDocument>
     }, AiError.AiError> {
@@ -708,7 +735,7 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
         }
       }
 
-      const request: typeof ConverseRequest.Encoded = {
+      const request: typeof ConverseStreamRequest.Encoded = {
         ...config,
         modelId,
         system,
@@ -736,7 +763,8 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
   return yield* LanguageModel.make({
     codecTransformer: toCodecAnthropic,
     generateText: Effect.fnUntraced(function*(options) {
-      const { documents, nameMapper, request } = yield* makeRequest(options)
+      const { documents, nameMapper, request: streamRequest } = yield* makeRequest(options)
+      const request = toConverseRequest(streamRequest)
       const rawResponse = yield* client.converse({ payload: request })
       return yield* makeResponse(request, rawResponse, options, nameMapper, documents)
     }),
@@ -747,6 +775,22 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
     }, (effect, _options) => effect.pipe(Stream.unwrap))
   })
 })
+
+/**
+ * Narrows the request that `makeRequest` built to the Converse wire shape, by
+ * removing `guardrailConfig.streamProcessingMode`, which only ConverseStream
+ * has.
+ */
+const toConverseRequest = (
+  request: typeof ConverseStreamRequest.Encoded
+): typeof ConverseRequest.Encoded => {
+  const { guardrailConfig, ...rest } = request
+  if (Predicate.isUndefined(guardrailConfig)) {
+    return rest
+  }
+  const { streamProcessingMode: _, ...converseGuardrail } = guardrailConfig
+  return { ...rest, guardrailConfig: converseGuardrail }
+}
 
 /**
  * Creates a layer for the Amazon Bedrock language model.
@@ -1460,7 +1504,7 @@ const makeResponse: (
 })
 
 const makeStreamResponse: (
-  request: typeof ConverseRequest.Encoded,
+  request: typeof ConverseStreamRequest.Encoded,
   stream: Stream.Stream<ConverseResponseStreamEvent, AiError.AiError>,
   nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>,
   documents: ReadonlyArray<CitedDocument>

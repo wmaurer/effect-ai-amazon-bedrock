@@ -75,3 +75,62 @@ export const happyPathFrames: ReadonlyArray<Uint8Array> = [
     metrics: { latencyMs: 123 }
   })
 ]
+
+const appliedGuardrailDetails = (guardrailId: string, origin: string) => ({
+  guardrailId,
+  guardrailVersion: "DRAFT",
+  guardrailArn: `arn:aws:bedrock:eu-west-1:123456789012:guardrail/${guardrailId}`,
+  guardrailOrigin: [origin],
+  guardrailOwnership: "SELF"
+})
+
+const invocationMetrics = {
+  guardrailProcessingLatency: 151,
+  usage: { wordPolicyUnits: 1, sensitiveInformationPolicyFreeUnits: 1 },
+  guardrailCoverage: { textCharacters: { guarded: 36, total: 36 } }
+}
+
+/** A Converse trace in the shape of the Smithy model: a word filter blocked the input. */
+export const inputBlockedTrace = {
+  guardrail: {
+    modelOutput: [],
+    inputAssessment: {
+      "gr-1": {
+        wordPolicy: { customWords: [{ match: "zorptangle", action: "BLOCKED", detected: true }] },
+        invocationMetrics,
+        appliedGuardrailDetails: appliedGuardrailDetails("gr-1", "REQUEST")
+      }
+    },
+    actionReason: "Guardrail blocked."
+  }
+}
+
+/** A Converse trace in the shape of the Smithy model: a regex filter masked the output. */
+export const outputMaskedTrace = {
+  guardrail: {
+    modelOutput: ["ticket {TICKET}"],
+    inputAssessment: {
+      "gr-1": {
+        wordPolicy: { customWords: [{ match: "zorptangle", action: "NONE", detected: false }] },
+        invocationMetrics,
+        appliedGuardrailDetails: appliedGuardrailDetails("gr-1", "REQUEST")
+      }
+    },
+    outputAssessments: {
+      "gr-1": [{
+        sensitiveInformationPolicy: {
+          regexes: [{
+            name: "ticket",
+            match: "TKT-123456",
+            regex: "TKT-[0-9]{6}",
+            action: "ANONYMIZED",
+            detected: true
+          }]
+        },
+        invocationMetrics,
+        appliedGuardrailDetails: appliedGuardrailDetails("gr-1", "REQUEST")
+      }]
+    },
+    actionReason: "Guardrail masked."
+  }
+}

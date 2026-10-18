@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { AmazonBedrockSchema } from "@wmaurer/effect-ai-amazon-bedrock"
 import { Effect, Schema } from "effect"
+import { inputBlockedTrace } from "./utils.ts"
 
 describe("AmazonBedrockSchema", () => {
   it.effect("decodes a toolUse content block", () =>
@@ -138,5 +139,25 @@ describe("AmazonBedrockSchema", () => {
 
       const decoded = yield* Schema.decodeUnknownEffect(AmazonBedrockSchema.ConverseRequest)(encoded)
       assert.deepStrictEqual(decoded.additionalModelRequestFields, fields)
+    }))
+
+  it.effect("decodes the trace of a Converse response unchanged", () =>
+    Effect.gen(function*() {
+      const decoded = yield* Schema.decodeUnknownEffect(AmazonBedrockSchema.ConverseResponse)({
+        output: { message: { role: "assistant", content: [{ text: "Blocked." }] } },
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        stopReason: "guardrail_intervened",
+        trace: inputBlockedTrace
+      })
+      assert.deepStrictEqual(decoded.trace, inputBlockedTrace)
+    }))
+
+  it.effect("decodes the trace of a stream metadata event unchanged", () =>
+    Effect.gen(function*() {
+      const decoded = yield* Schema.decodeUnknownEffect(AmazonBedrockSchema.ConverseStreamMetadataEvent)({
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        trace: inputBlockedTrace
+      })
+      assert.deepStrictEqual(decoded.trace, inputBlockedTrace)
     }))
 })
