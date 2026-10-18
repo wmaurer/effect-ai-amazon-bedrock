@@ -67,6 +67,7 @@ import type {
   ToolChoice,
   ToolConfiguration
 } from "./AmazonBedrockSchema.ts"
+import * as InternalGuardrails from "./internal/guardrails.ts"
 import * as InternalUtilities from "./internal/utilities.ts"
 
 /**
@@ -492,7 +493,7 @@ const reasoningTextInfo = (signature: string | undefined): ReasoningInfo => ({
 })
 
 // =============================================================================
-// Configuration
+// Guardrails
 // =============================================================================
 
 /**
@@ -514,6 +515,82 @@ const reasoningTextInfo = (signature: string | undefined): ReasoningInfo => ({
  * @since 0.4.0
  */
 export type GuardrailConfig = typeof GuardrailStreamConfiguration.Encoded
+
+/**
+ * What a guardrail did to one side of the exchange.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.4.0
+ */
+export type GuardrailAction = "blocked" | "masked" | "none"
+
+/**
+ * What the guardrails did, read from the trace.
+ *
+ * **Details**
+ *
+ * `input` and `output` are the strongest action that any guardrail took on
+ * that side, `blocked` over `masked` over `none`, across every guardrail in
+ * the trace, enforced guardrails included. `policies` lists the trace keys of
+ * the policies that blocked or masked, such as `wordPolicy` or
+ * `sensitiveInformationPolicy`, each once, in the order the trace names them.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.4.0
+ */
+export type GuardrailOutcome = {
+  readonly input: GuardrailAction
+  readonly output: GuardrailAction
+  // Mutable, because the same type rides on ContentPolicyError, whose
+  // metadata must be MutableJson.
+  readonly policies: Array<string>
+}
+
+/**
+ * The Amazon Bedrock metadata on every finish part.
+ *
+ * **Details**
+ *
+ * `stopReason` is the raw Converse stop reason. It tells
+ * `guardrail_intervened` from `content_filtered`, which both finish with
+ * `"content-filter"`, and `max_tokens` from `model_context_window_exceeded`,
+ * which both finish with `"length"`. It is `null` only when a stream ended
+ * without a `messageStop` event.
+ *
+ * `guardrail` is `null` when the response carried no guardrail trace, which
+ * is the case unless `trace` is enabled in the guardrail config. A trace in
+ * which nothing acted gives `{ input: "none", output: "none", policies: [] }`.
+ * `trace` is the Converse trace as Bedrock sent it, or `null`. It holds the
+ * text that a policy matched, unmasked.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.4.0
+ */
+export type FinishMetadata = {
+  readonly stopReason: string | null
+  readonly guardrail: GuardrailOutcome | null
+  readonly trace: Schema.MutableJson | null
+}
+
+declare module "effect/ai/Response" {
+  /**
+   * Amazon Bedrock metadata on the finish part.
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.4.0
+   */
+  export interface FinishPartMetadata extends ProviderMetadata {
+    readonly amazonBedrock?: FinishMetadata | null
+  }
+}
+
+// =============================================================================
+// Configuration
+// =============================================================================
 
 /**
  * Per-request configuration for the Amazon Bedrock language model.
@@ -1497,7 +1574,8 @@ const makeResponse: (
     },
     // `Response.FinishPart` models `response` with `Schema.UndefinedOr`, which
     // requires the key; HTTP response details are not surfaced by the client.
-    response: undefined
+    response: undefined,
+    metadata: { amazonBedrock: InternalGuardrails.finishMetadata(response.stopReason, response.trace) }
   })
 
   return parts
@@ -1547,6 +1625,7 @@ const makeStreamResponse: (
     // (which AWS sends AFTER messageStop and which carries the usage), so finish
     // reports the real token counts rather than the pre-metadata zeros.
     let finishReason: Response.FinishReason = "unknown"
+    let stopReason: string | null = null
 
     return stream.pipe(
       Stream.mapEffect(Effect.fnUntraced(function*(event) {
@@ -1726,6 +1805,7 @@ const makeStreamResponse: (
             // Defer the `finish` part to the trailing `metadata` event (usage
             // is still zero here — metadata has not arrived yet).
             finishReason = InternalUtilities.resolveFinishReason(event.messageStop.stopReason)
+            stopReason = event.messageStop.stopReason
             break
           }
 
@@ -1754,7 +1834,8 @@ const makeStreamResponse: (
                 }
               },
               // See `makeResponse`: the key is required (`Schema.UndefinedOr`).
-              response: undefined
+              response: undefined,
+              metadata: { amazonBedrock: InternalGuardrails.finishMetadata(stopReason, event.metadata.trace) }
             })
             break
           }
