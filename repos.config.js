@@ -47,6 +47,14 @@ export default {
     {
       name: "vercel-ai",
       url: "https://github.com/vercel/ai.git"
+    },
+    // Pydantic AI's Bedrock model, a second Converse client, as prior art for
+    // which model families accept which tool choices and output formats.
+    //   pydantic_ai_slim/pydantic_ai/models/bedrock.py
+    //   pydantic_ai_slim/pydantic_ai/providers/bedrock.py
+    {
+      name: "pydantic-ai",
+      url: "https://github.com/pydantic/pydantic-ai.git"
     }
   ],
 
