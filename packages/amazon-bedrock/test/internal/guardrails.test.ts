@@ -168,3 +168,19 @@ describe("finishMetadata", () => {
     })
   })
 })
+
+describe("blocksObject", () => {
+  it("blocks a guardrail response whose text is not JSON", () => {
+    assert.strictEqual(Guardrails.blocksObject("guardrail_intervened", "BLOCKED_INPUT_MESSAGE"), true)
+    assert.strictEqual(Guardrails.blocksObject("guardrail_intervened", ""), true)
+  })
+
+  it("lets a masked JSON object through", () => {
+    assert.strictEqual(Guardrails.blocksObject("guardrail_intervened", "{\"ticket\":\"{TICKET}\"}"), false)
+  })
+
+  it("leaves text after any other stop reason to the decoder", () => {
+    assert.strictEqual(Guardrails.blocksObject("end_turn", "not json"), false)
+    assert.strictEqual(Guardrails.blocksObject("content_filtered", "not json"), false)
+  })
+})

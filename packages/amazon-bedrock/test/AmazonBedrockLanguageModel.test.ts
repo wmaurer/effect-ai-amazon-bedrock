@@ -2630,4 +2630,133 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.deepStrictEqual(finish?.metadata.amazonBedrock, { stopReason: "end_turn", guardrail: null, trace: null })
       }))
   })
+
+  describe("generateObject when a guardrail intervenes", () => {
+    const Ticket = Schema.Struct({ ticket: Schema.String })
+    const claude = "eu.anthropic.claude-opus-4-8"
+    const toolPath = AmazonBedrockLanguageModel.withConfigOverride({ structuredOutputs: false })
+    const guardrailResponse = (
+      request: HttpClientRequest.HttpClientRequest,
+      content: ReadonlyArray<unknown>,
+      trace?: unknown
+    ) =>
+      jsonResponse(request, {
+        output: { message: { role: "assistant", content } },
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        stopReason: "guardrail_intervened",
+        ...(trace === undefined ? {} : { trace })
+      })
+    const blockedDescription = "An Amazon Bedrock guardrail intervened, and the response holds no JSON object. " +
+      "Bedrock answered: BLOCKED_INPUT_MESSAGE"
+
+    it.effect("fails with ContentPolicyError on the native path", () =>
+      Effect.gen(function*() {
+        const error = yield* LanguageModel.generateObject({ prompt: "zorptangle", schema: Ticket }).pipe(
+          Effect.provide(layersFor(
+            (request) =>
+              Effect.succeed(guardrailResponse(request, [{ text: "BLOCKED_INPUT_MESSAGE" }], inputBlockedTrace)),
+            claude
+          )),
+          Effect.flip
+        )
+
+        assert.strictEqual(error.reason._tag, "ContentPolicyError")
+        assert.strictEqual(error.isRetryable, false)
+        if (error.reason._tag === "ContentPolicyError") {
+          assert.strictEqual(error.reason.description, blockedDescription)
+          assert.deepStrictEqual(error.reason.metadata.amazonBedrock, {
+            stopReason: "guardrail_intervened",
+            guardrail: { input: "blocked", output: "none", policies: ["wordPolicy"] },
+            trace: inputBlockedTrace
+          })
+        }
+      }))
+
+    it.effect("fails with ContentPolicyError on the object tool path", () =>
+      Effect.gen(function*() {
+        const error = yield* LanguageModel.generateObject({ prompt: "zorptangle", schema: Ticket }).pipe(
+          toolPath,
+          Effect.provide(layersFor(
+            (request) => Effect.succeed(guardrailResponse(request, [{ text: "BLOCKED_INPUT_MESSAGE" }])),
+            claude
+          )),
+          Effect.flip
+        )
+
+        assert.strictEqual(error.reason._tag, "ContentPolicyError")
+        assert.strictEqual(error.isRetryable, false)
+        if (error.reason._tag === "ContentPolicyError") {
+          assert.strictEqual(error.reason.description, blockedDescription)
+          assert.deepStrictEqual(error.reason.metadata.amazonBedrock, {
+            stopReason: "guardrail_intervened",
+            guardrail: null,
+            trace: null
+          })
+        }
+      }))
+
+    it.effect("quotes only the first 200 characters of the response", () =>
+      Effect.gen(function*() {
+        const error = yield* LanguageModel.generateObject({ prompt: "zorptangle", schema: Ticket }).pipe(
+          Effect.provide(layersFor(
+            (request) =>
+              Effect.succeed(guardrailResponse(request, [{ text: "x".repeat(150) }, { text: "y".repeat(150) }])),
+            claude
+          )),
+          Effect.flip
+        )
+
+        assert.strictEqual(
+          error.reason._tag === "ContentPolicyError" ? error.reason.description : undefined,
+          "An Amazon Bedrock guardrail intervened, and the response holds no JSON object. Bedrock answered: " +
+            `${"x".repeat(150)}${"y".repeat(50)}...`
+        )
+      }))
+
+    it.effect("decodes a masked object on the native path", () =>
+      Effect.gen(function*() {
+        const result = yield* LanguageModel.generateObject({ prompt: "Repeat TKT-123456", schema: Ticket }).pipe(
+          Effect.provide(layersFor(
+            (request) =>
+              Effect.succeed(guardrailResponse(request, [{ text: "{\"ticket\":\"{TICKET}\"}" }], outputMaskedTrace)),
+            claude
+          ))
+        )
+
+        assert.deepStrictEqual(result.value, { ticket: "{TICKET}" })
+      }))
+
+    it.effect("decodes a masked object on the object tool path", () =>
+      Effect.gen(function*() {
+        const result = yield* LanguageModel.generateObject({
+          prompt: "Repeat TKT-123456",
+          objectName: "Ticket",
+          schema: Ticket
+        }).pipe(
+          toolPath,
+          Effect.provide(layersFor(
+            (request) =>
+              Effect.succeed(guardrailResponse(request, [
+                { text: "Here it is." },
+                { toolUse: { toolUseId: "tu_1", name: "Ticket", input: { ticket: "{TICKET}" } } }
+              ])),
+            claude
+          ))
+        )
+
+        assert.deepStrictEqual(result.value, { ticket: "{TICKET}" })
+      }))
+
+    it.effect("leaves generateText to answer with the blocked message", () =>
+      Effect.gen(function*() {
+        const response = yield* LanguageModel.generateText({ prompt: "zorptangle" }).pipe(
+          Effect.provide(layersFor(
+            (request) => Effect.succeed(guardrailResponse(request, [{ text: "BLOCKED_INPUT_MESSAGE" }])),
+            claude
+          ))
+        )
+
+        assert.strictEqual(response.text, "BLOCKED_INPUT_MESSAGE")
+      }))
+  })
 })
