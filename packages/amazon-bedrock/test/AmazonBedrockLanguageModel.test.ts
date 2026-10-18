@@ -3,7 +3,7 @@ import { AmazonBedrockClient, AmazonBedrockLanguageModel } from "@wmaurer/effect
 import { Effect, Layer, Redacted, Schema, Stream } from "effect"
 import { type AiError, LanguageModel, Prompt, Tool, Toolkit } from "effect/ai"
 import { HttpClient, type HttpClientError, type HttpClientRequest, HttpClientResponse } from "effect/http"
-import { concat, eventFrame, exceptionFrame, happyPathFrames } from "./utils.ts"
+import { concat, eventFrame, exceptionFrame, happyPathFrames, inputBlockedTrace, outputMaskedTrace } from "./utils.ts"
 
 const makeHttpClient = (
   handler: (
@@ -2533,6 +2533,101 @@ describe("AmazonBedrockLanguageModel", () => {
 
         const body = yield* getRequestBody(captured[0]!)
         assert.deepStrictEqual(body.guardrailConfig, { guardrailIdentifier: "gr-override", guardrailVersion: "2" })
+      }))
+  })
+
+  describe("finish metadata", () => {
+    const blockedResponse = (request: HttpClientRequest.HttpClientRequest, trace?: unknown) =>
+      jsonResponse(request, {
+        output: { message: { role: "assistant", content: [{ text: "BLOCKED_INPUT_MESSAGE" }] } },
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        stopReason: "guardrail_intervened",
+        ...(trace === undefined ? {} : { trace })
+      })
+
+    const streamFrames = (stopReason: string | undefined, trace: unknown) => [
+      eventFrame("messageStart", { role: "assistant" }),
+      eventFrame("contentBlockDelta", { contentBlockIndex: 0, delta: { text: "ticket {TICKET}" } }),
+      eventFrame("contentBlockStop", { contentBlockIndex: 0 }),
+      ...(stopReason === undefined ? [] : [eventFrame("messageStop", { stopReason })]),
+      eventFrame("metadata", {
+        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        ...(trace === undefined ? {} : { trace })
+      })
+    ]
+
+    it.effect("reports the stop reason and what the guardrail did on generateText", () =>
+      Effect.gen(function*() {
+        const response = yield* LanguageModel.generateText({ prompt: "zorptangle" }).pipe(
+          Effect.provide(layersFor((request) => Effect.succeed(blockedResponse(request, inputBlockedTrace))))
+        )
+
+        assert.strictEqual(response.text, "BLOCKED_INPUT_MESSAGE")
+        assert.strictEqual(response.finishReason, "content-filter")
+        const finish = response.content.find((part) => part.type === "finish")
+        assert.deepStrictEqual(finish?.metadata.amazonBedrock, {
+          stopReason: "guardrail_intervened",
+          guardrail: { input: "blocked", output: "none", policies: ["wordPolicy"] },
+          trace: inputBlockedTrace
+        })
+      }))
+
+    it.effect("reports the stop reason without a trace on generateText", () =>
+      Effect.gen(function*() {
+        const response = yield* LanguageModel.generateText({ prompt: "zorptangle" }).pipe(
+          Effect.provide(layersFor((request) => Effect.succeed(blockedResponse(request))))
+        )
+
+        const finish = response.content.find((part) => part.type === "finish")
+        assert.deepStrictEqual(finish?.metadata.amazonBedrock, {
+          stopReason: "guardrail_intervened",
+          guardrail: null,
+          trace: null
+        })
+      }))
+
+    it.effect("reports the stop reason and what the guardrail did on streamText", () =>
+      Effect.gen(function*() {
+        const parts = yield* LanguageModel.streamText({ prompt: "Repeat TKT-123456" }).pipe(
+          Stream.runCollect,
+          Effect.provide(layersFor((request) =>
+            Effect.succeed(binaryResponse(request, concat(streamFrames("guardrail_intervened", outputMaskedTrace))))
+          ))
+        )
+
+        const finish = parts.find((part) =>
+          part.type === "finish"
+        )
+        assert.strictEqual(finish?.reason, "content-filter")
+        assert.deepStrictEqual(finish?.metadata.amazonBedrock, {
+          stopReason: "guardrail_intervened",
+          guardrail: { input: "none", output: "masked", policies: ["sensitiveInformationPolicy"] },
+          trace: outputMaskedTrace
+        })
+      }))
+
+    it.effect("reports a null stop reason when a stream ends without messageStop", () =>
+      Effect.gen(function*() {
+        const parts = yield* LanguageModel.streamText({ prompt: "Hello" }).pipe(
+          Stream.runCollect,
+          Effect.provide(
+            layersFor((request) => Effect.succeed(binaryResponse(request, concat(streamFrames(undefined, undefined)))))
+          )
+        )
+
+        const finish = parts.find((part) => part.type === "finish")
+        assert.deepStrictEqual(finish?.metadata.amazonBedrock, { stopReason: null, guardrail: null, trace: null })
+      }))
+
+    it.effect("reports the raw stop reason when no guardrail is configured", () =>
+      Effect.gen(function*() {
+        const parts = yield* LanguageModel.streamText({ prompt: "Hello" }).pipe(
+          Stream.runCollect,
+          Effect.provide(layersFor((request) => Effect.succeed(binaryResponse(request, concat(happyPathFrames)))))
+        )
+
+        const finish = parts.find((part) => part.type === "finish")
+        assert.deepStrictEqual(finish?.metadata.amazonBedrock, { stopReason: "end_turn", guardrail: null, trace: null })
       }))
   })
 })
