@@ -1,0 +1,38 @@
+{
+  "name": "effect-ai-bedrock-live",
+  "description": "The guardrail of the live suite of @wmaurer/effect-ai-amazon-bedrock. Word and regex filters only, which cost nothing to evaluate.",
+  "wordPolicyConfig": {
+    "wordsConfig": [
+      {
+        "text": "zorptangle",
+        "inputAction": "BLOCK",
+        "inputEnabled": true,
+        "outputAction": "BLOCK",
+        "outputEnabled": true
+      },
+      {
+        "text": "Canberra",
+        "inputAction": "NONE",
+        "inputEnabled": false,
+        "outputAction": "BLOCK",
+        "outputEnabled": true
+      }
+    ]
+  },
+  "sensitiveInformationPolicyConfig": {
+    "regexesConfig": [
+      {
+        "name": "ticket",
+        "description": "A support ticket ID",
+        "pattern": "TKT-[0-9]{6}",
+        "action": "ANONYMIZE",
+        "inputAction": "NONE",
+        "inputEnabled": false,
+        "outputAction": "ANONYMIZE",
+        "outputEnabled": true
+      }
+    ]
+  },
+  "blockedInputMessaging": "BLOCKED_INPUT_MESSAGE",
+  "blockedOutputsMessaging": "BLOCKED_OUTPUT_MESSAGE"
+}

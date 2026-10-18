@@ -38,14 +38,18 @@ The suites stay in this repository. An upstream pull request to Effect leaves th
    Every file and every test passes. With the current suites, the summary is:
 
    ```text
-   Test Files  7 passed (7)
-        Tests  27 passed (27)
+   Test Files  8 passed (8)
+        Tests  39 passed (39)
    ```
+
+   The summary counts the guardrail suite, which passes only with a guardrail in the account. Without `BEDROCK_GUARDRAIL_ID`, its 12 tests are skipped. See [Run the guardrail suite](#run-the-guardrail-suite).
 
 ## Two gates keep the suites from running by accident
 
 1. The root `vitest.config.ts` excludes every `*.integration.test.ts` file unless `EFFECT_INTEGRATION_TESTS=1`. `pnpm test` does not set the variable, so it never collects these files. `pnpm test:live` sets it, which opens the first gate.
 2. Each suite skips itself when `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` is unset. A variable set to an empty string counts as set.
+
+The guardrail suite has a third gate. It skips itself when `BEDROCK_GUARDRAIL_ID` is unset, so `pnpm test:live` stays green on an account without the guardrail.
 
 ## Choose the region and the model
 
@@ -59,9 +63,49 @@ Put the start of the suite's file name after `test/live`, up to and including `.
 EFFECT_INTEGRATION_TESTS=1 pnpm vitest run --no-file-parallelism test/live/AmazonBedrockErrors.integration
 ```
 
-vitest matches the filter against any part of the path. Every file name starts with `AmazonBedrock`, so `test/live/AmazonBedrock` matches all seven files. To run only the core suite, use `test/live/AmazonBedrock.integration`. `pnpm test:live` always runs every file, even with a file name after it.
+vitest matches the filter against any part of the path. Every file name starts with `AmazonBedrock`, so `test/live/AmazonBedrock` matches all eight files. To run only the core suite, use `test/live/AmazonBedrock.integration`. `pnpm test:live` always runs every file, even with a file name after it.
 
 Keep `--no-file-parallelism` whenever the filter can match more than one file. Without the flag, vitest runs the files at the same time. Each suite declares `{ concurrent: false }`, but that orders only the tests inside one file. The burst of calls can exceed the account's on-demand tokens-per-minute quota, and then some tests fail with `RateLimitError`.
+
+## Run the guardrail suite
+
+`AmazonBedrockGuardrails.integration.test.ts` runs against a guardrail that `guardrail.json` defines. The suite creates and deletes no AWS resource, so you create the guardrail once and keep it. The guardrail has three policies:
+
+- A word filter blocks `zorptangle` on input and on output.
+- A second word filter blocks `Canberra` on output only.
+- A regex filter masks `TKT-[0-9]{6}` on output only.
+
+The tests assert the blocked messages that the file configures, `BLOCKED_INPUT_MESSAGE` and `BLOCKED_OUTPUT_MESSAGE`. If you change them in the file, change them in the suite too.
+
+1. Check that the IAM policy behind the credentials allows `bedrock:ApplyGuardrail` on the guardrail's ARN, `arn:aws:bedrock:eu-west-1:<account>:guardrail/<guardrail id>`. Converse and ConverseStream need it for every request that names the guardrail. Creating and deleting the guardrail also needs `bedrock:CreateGuardrail` and `bedrock:DeleteGuardrail`.
+
+2. Create the guardrail, and export its ID:
+
+   ```sh
+   export BEDROCK_GUARDRAIL_ID=$(aws bedrock create-guardrail --region eu-west-1 \
+     --cli-input-json file://packages/amazon-bedrock/test/live/guardrail.json \
+     --query guardrailId --output text)
+   ```
+
+   Create it in the region that `AWS_REGION` names, `eu-west-1` by default. The guardrail is named `effect-ai-bedrock-live`. To find the ID of one you created earlier, run `aws bedrock list-guardrails --region eu-west-1`.
+
+3. Optional: export `BEDROCK_GUARDRAIL_VERSION`. The suite uses `DRAFT` when it is unset. `DRAFT` is the working version, which `create-guardrail` makes, so you do not need `create-guardrail-version`.
+
+4. Run the suite:
+
+   ```sh
+   EFFECT_INTEGRATION_TESTS=1 pnpm vitest run --no-file-parallelism test/live/AmazonBedrockGuardrails.integration
+   ```
+
+   The suite prints lines that start with `[guardrails live]`. They record what Bedrock sent: the trace of a blocked input, the masked text, the text deltas of a blocked stream in each mode, and the exception and message for a guardrail version that does not exist.
+
+To delete the guardrail:
+
+```sh
+aws bedrock delete-guardrail --region eu-west-1 --guardrail-identifier "$BEDROCK_GUARDRAIL_ID"
+```
+
+Word filters and regex filters cost nothing to evaluate, and the [Amazon Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/) names no charge for keeping a guardrail. A blocked input runs no model. Six tests reach the model, each with one short request with `maxTokens` 64 to the default model, so the suite costs about what 6 short `generateText` calls cost.
 
 ## Read a failed run
 
@@ -72,7 +116,7 @@ Keep `--no-file-parallelism` whenever the filter can match more than one file. W
 - Tests fail with `AuthenticationError` of kind `InsufficientPermissions` and `x-amzn-errortype` `AccessDeniedException`. The IAM policy or the account's model access does not cover a model or a region that the run uses.
 - Some tests fail with `RateLimitError`. If you ran vitest yourself, add `--no-file-parallelism`. Otherwise wait a minute and run again.
 
-## A full run makes about 25 Bedrock calls
+## A full run makes about 37 Bedrock calls
 
 AWS rejects every call of the errors suite before it reaches a model, so those calls cost nothing. The other prompts are short. Two groups of tests cost more:
 
@@ -94,12 +138,13 @@ The "Models from other providers" section of `docs/TODO.md` records what the pro
 
 ## What each suite checks
 
-| File                                           | What it checks                                                                                                                                                                      |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AmazonBedrock.integration.test.ts`            | `generateText`, `generateObject` on the native and the object-tool paths, the `max_tokens` stop reason, cache checkpoints at both TTLs, the usage arithmetic                        |
-| `AmazonBedrockStream.integration.test.ts`      | Text deltas over several event-stream frames, and a tool call whose input JSON is split across frames                                                                               |
-| `AmazonBedrockContent.integration.test.ts`     | Image blocks, document blocks, and citations                                                                                                                                        |
-| `AmazonBedrockErrors.integration.test.ts`      | The `x-amzn-errortype` values behind `AuthenticationError.kind`, and signing with no session token                                                                                  |
-| `AmazonBedrockTools.integration.test.ts`       | A `toolResult` sent back against its `toolUse`, and `generateObject` with tool history in the prompt                                                                                |
-| `AmazonBedrockCredentials.integration.test.ts` | A function and an `Effect` credential provider, a refetch with `forceRefresh` after AWS rejects the provider's credentials, and a short-term Bedrock API key, accepted and tampered |
-| `AmazonBedrockReasoning.integration.test.ts`   | Extended thinking through `additionalModelRequestFields`, the signed reasoning block sent back in a later turn, and reasoning deltas over the stream                                |
+| File                                           | What it checks                                                                                                                                                                                             |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AmazonBedrock.integration.test.ts`            | `generateText`, `generateObject` on the native and the object-tool paths, the `max_tokens` stop reason, cache checkpoints at both TTLs, the usage arithmetic                                               |
+| `AmazonBedrockStream.integration.test.ts`      | Text deltas over several event-stream frames, and a tool call whose input JSON is split across frames                                                                                                      |
+| `AmazonBedrockContent.integration.test.ts`     | Image blocks, document blocks, and citations                                                                                                                                                               |
+| `AmazonBedrockErrors.integration.test.ts`      | The `x-amzn-errortype` values behind `AuthenticationError.kind`, and signing with no session token                                                                                                         |
+| `AmazonBedrockTools.integration.test.ts`       | A `toolResult` sent back against its `toolUse`, and `generateObject` with tool history in the prompt                                                                                                       |
+| `AmazonBedrockCredentials.integration.test.ts` | A function and an `Effect` credential provider, a refetch with `forceRefresh` after AWS rejects the provider's credentials, and a short-term Bedrock API key, accepted and tampered                        |
+| `AmazonBedrockReasoning.integration.test.ts`   | Extended thinking through `additionalModelRequestFields`, the signed reasoning block sent back in a later turn, and reasoning deltas over the stream                                                       |
+| `AmazonBedrockGuardrails.integration.test.ts`  | A blocked input, a blocked output, a masked output, both stream processing modes, `guardContent` on parts and the system prompt, `ContentPolicyError` from `generateObject`, and a wrong guardrail version |
