@@ -8,8 +8,9 @@ The suites stay in this repository. An upstream pull request to Effect leaves th
 
 - Run every command in this guide from the repository root. `pnpm test:live` is a script in the root `package.json`. In `packages/amazon-bedrock`, pnpm stops with `Command "test:live" not found`.
 - Get temporary AWS credentials. AWS STS issues them for a session, for example when you assume an IAM role or sign in through IAM Identity Center. They are three values: an access key id that starts with `ASIA`, a secret access key, and a session token. They stop working when the session expires.
-- Do not use a long-lived IAM user key, whose id starts with `AKIA`. It has no session token, and one test in the errors suite needs AWS to reject a request that leaves the token out.
+- Do not use a long-lived IAM user key, whose id starts with `AKIA`, directly. It has no session token, and one test in the errors suite needs AWS to reject a request that leaves the token out. Exchange such a key for temporary credentials first, as step 2 of [Run the suites](#run-the-suites) shows.
 - Check that the IAM policy behind the credentials allows `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream`, and `bedrock:CallWithBearerToken`. The credentials suite makes a short-term Bedrock API key from the credentials, and the last permission lets that key call Bedrock. The default models are EU geo inference profiles, so the policy must allow the `inference-profile` ARN and also the `foundation-model` ARN in every region that the profile sends requests to.
+- Allow `bedrock:CallWithBearerToken` on `"Resource": "*"`, in a statement of its own. AWS checks it against `*`, not against a model ARN, so a statement that allows it only on model ARNs never matches, and the credentials suite fails with `AuthenticationError` of kind `InsufficientPermissions`.
 
 ## Run the suites
 
@@ -28,6 +29,17 @@ The suites stay in this repository. An upstream pull request to Effect leaves th
    ```
 
    The suites read only these environment variables. They ignore `~/.aws/credentials` and AWS profiles.
+
+   If you have a long-lived IAM user key instead, exchange it for credentials that last one hour. Run these lines with the key as the AWS CLI's credentials, for example through `AWS_PROFILE`, and with no `AWS_SESSION_TOKEN` in the shell:
+
+   ```sh
+   read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN < <(
+     aws sts get-session-token --duration-seconds 3600 \
+       --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text)
+   export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+   ```
+
+   Run them again when the credentials expire.
 
 3. Run the suites:
 
