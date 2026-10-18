@@ -378,6 +378,79 @@ export class CitationsContentBlock extends Schema.Class<CitationsContentBlock>(
 }) {}
 
 /**
+ * The role a guarded text block plays in a contextual grounding check.
+ *
+ * **Details**
+ *
+ * `grounding_source` marks the documents an answer must be grounded in,
+ * `query` marks the question, and `guard_content` marks text the guardrail
+ * evaluates without a grounding role.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.4.0
+ */
+export const GuardrailConverseContentQualifier = Schema.Literals(["grounding_source", "query", "guard_content"])
+
+/**
+ * Text that the guardrail evaluates.
+ *
+ * **Details**
+ *
+ * `qualifiers` uses `optionalKey` for the same reason as
+ * `CachePointBlock.ttl`: the block is built from `Prompt` provider options,
+ * whose values must satisfy `Schema.Json`.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.4.0
+ */
+export class GuardrailConverseTextBlock extends Schema.Class<GuardrailConverseTextBlock>(
+  makeIdentifier("GuardrailConverseTextBlock")
+)({
+  text: Schema.String,
+  qualifiers: Schema.optionalKey(Schema.Array(GuardrailConverseContentQualifier))
+}) {}
+
+/**
+ * An image that the guardrail evaluates.
+ *
+ * **Details**
+ *
+ * The Smithy model allows only png and jpeg, and only `bytes` as the source.
+ * `bytes` is a Smithy blob, which the JSON protocol carries as a base64
+ * string.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.4.0
+ */
+export class GuardrailConverseImageBlock extends Schema.Class<GuardrailConverseImageBlock>(
+  makeIdentifier("GuardrailConverseImageBlock")
+)({
+  format: Schema.Literals(["png", "jpeg"]),
+  source: Schema.Struct({ bytes: Schema.String })
+}) {}
+
+/**
+ * Content that the guardrail evaluates, in a message or in the system prompt.
+ *
+ * **Details**
+ *
+ * AWS models `GuardrailConverseContentBlock` as a UNION, so both members are
+ * optional here. Once a request holds one `guardContent` block, the guardrail
+ * evaluates only the guarded blocks. The model still reads every block.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.4.0
+ */
+export const GuardrailConverseContentBlock = Schema.Struct({
+  text: Schema.optional(GuardrailConverseTextBlock),
+  image: Schema.optional(GuardrailConverseImageBlock)
+})
+
+/**
  * A text content block within a Converse message.
  *
  * **Details**
@@ -401,7 +474,8 @@ export const ContentBlock = Schema.Struct({
   image: Schema.optional(ImageBlock),
   document: Schema.optional(DocumentBlock),
   cachePoint: Schema.optional(CachePointBlock),
-  citationsContent: Schema.optional(CitationsContentBlock)
+  citationsContent: Schema.optional(CitationsContentBlock),
+  guardContent: Schema.optional(GuardrailConverseContentBlock)
 })
 
 /**
@@ -421,8 +495,9 @@ export class Message extends Schema.Class<Message>(makeIdentifier("Message"))({
  *
  * **Details**
  *
- * AWS models `SystemContentBlock` as a UNION, so both members are optional; a
- * block carries either the system text or a cache point.
+ * AWS models `SystemContentBlock` as a UNION, so every member is optional; a
+ * block carries the system text, guarded system text, or a cache point. The
+ * guardrail evaluates the system prompt only where it is guarded.
  *
  * @stability unstable
  * @category schemas
@@ -430,7 +505,8 @@ export class Message extends Schema.Class<Message>(makeIdentifier("Message"))({
  */
 export const SystemContentBlock = Schema.Struct({
   text: Schema.optional(Schema.String),
-  cachePoint: Schema.optional(CachePointBlock)
+  cachePoint: Schema.optional(CachePointBlock),
+  guardContent: Schema.optional(GuardrailConverseContentBlock)
 })
 
 /**
@@ -578,7 +654,80 @@ export const OutputConfig = Schema.Struct({
 })
 
 /**
- * The request payload for the Converse and ConverseStream operations.
+ * Whether Bedrock returns the guardrail trace.
+ *
+ * **Details**
+ *
+ * Bedrock's default is `disabled`. The trace holds the text that a policy
+ * matched, unmasked. `enabled_full` is in the Smithy model, and AWS does not
+ * document it.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.4.0
+ */
+export const GuardrailTrace = Schema.Literals(["enabled", "disabled", "enabled_full"])
+
+/**
+ * How ConverseStream applies a guardrail to the streamed output.
+ *
+ * **Details**
+ *
+ * `sync`, Bedrock's default, holds back each chunk until the guardrail has
+ * evaluated it. `async` sends chunks at once, so text that the guardrail
+ * later blocks can reach the caller, and masking does not apply.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.4.0
+ */
+export const GuardrailStreamProcessingMode = Schema.Literals(["sync", "async"])
+
+// Smithy gives the identifier and the version `default: ""`, and Bedrock cannot
+// apply a guardrail without them, so both are required here.
+const guardrailFields = {
+  guardrailIdentifier: Schema.String,
+  guardrailVersion: Schema.String,
+  trace: Schema.optionalKey(GuardrailTrace)
+}
+
+/**
+ * The guardrail of a Converse request.
+ *
+ * **Details**
+ *
+ * `guardrailIdentifier` is the guardrail's ID or ARN, and `guardrailVersion`
+ * is a version number or `DRAFT`. Converse has no `streamProcessingMode`, so
+ * the member is typed `never`: a ConverseStream request does not fit Converse
+ * until the mode is removed.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.4.0
+ */
+export class GuardrailConfiguration extends Schema.Class<GuardrailConfiguration>(
+  makeIdentifier("GuardrailConfiguration")
+)({
+  ...guardrailFields,
+  streamProcessingMode: Schema.optionalKey(Schema.Never)
+}) {}
+
+/**
+ * The guardrail of a ConverseStream request.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.4.0
+ */
+export class GuardrailStreamConfiguration extends Schema.Class<GuardrailStreamConfiguration>(
+  makeIdentifier("GuardrailStreamConfiguration")
+)({
+  ...guardrailFields,
+  streamProcessingMode: Schema.optionalKey(GuardrailStreamProcessingMode)
+}) {}
+
+/**
+ * The request payload for the Converse operation.
  *
  * **Details**
  *
@@ -602,8 +751,29 @@ export class ConverseRequest extends Schema.Class<ConverseRequest>(makeIdentifie
   toolConfig: Schema.optionalKey(ToolConfiguration),
   inferenceConfig: Schema.optional(InferenceConfiguration),
   outputConfig: Schema.optionalKey(OutputConfig),
-  additionalModelRequestFields: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
+  additionalModelRequestFields: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+  guardrailConfig: Schema.optional(GuardrailConfiguration)
 }) {}
+
+/**
+ * The request payload for the ConverseStream operation.
+ *
+ * **Details**
+ *
+ * The members of `ConverseRequest`, with the guardrail of a stream, which
+ * adds `streamProcessingMode`. That member is the only difference between the
+ * two operations.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 0.4.0
+ */
+export class ConverseStreamRequest
+  extends Schema.Class<ConverseStreamRequest>(makeIdentifier("ConverseStreamRequest"))({
+    ...ConverseRequest.fields,
+    guardrailConfig: Schema.optional(GuardrailStreamConfiguration)
+  })
+{}
 
 // =============================================================================
 // Response
@@ -634,6 +804,12 @@ export class ConverseMetrics extends Schema.Class<ConverseMetrics>(makeIdentifie
 /**
  * The response from a successful Converse call.
  *
+ * **Details**
+ *
+ * `trace` is kept as the JSON Bedrock sent. Its Smithy tree has about 90
+ * shapes that AWS still extends, and a struct would drop every member added
+ * later.
+ *
  * @stability unstable
  * @category schemas
  * @since 0.1.0
@@ -642,7 +818,8 @@ export class ConverseResponse extends Schema.Class<ConverseResponse>(makeIdentif
   output: ConverseOutput,
   usage: TokenUsage,
   stopReason: StopReason,
-  metrics: Schema.optional(ConverseMetrics)
+  metrics: Schema.optional(ConverseMetrics),
+  trace: Schema.optional(Schema.MutableJson)
 }) {}
 
 // =============================================================================
@@ -823,7 +1000,13 @@ export class MessageStopEvent extends Schema.Class<MessageStopEvent>(
 }) {}
 
 /**
- * The trailing metadata event for a Converse stream, carrying usage and metrics.
+ * The trailing metadata event for a Converse stream, carrying usage, metrics,
+ * and the trace.
+ *
+ * **Details**
+ *
+ * This is the only stream event that carries the trace. It is kept as JSON,
+ * as in `ConverseResponse`.
  *
  * @stability unstable
  * @category schemas
@@ -833,7 +1016,8 @@ export class ConverseStreamMetadataEvent extends Schema.Class<ConverseStreamMeta
   makeIdentifier("ConverseStreamMetadataEvent")
 )({
   usage: TokenUsage,
-  metrics: Schema.optional(ConverseMetrics)
+  metrics: Schema.optional(ConverseMetrics),
+  trace: Schema.optional(Schema.MutableJson)
 }) {}
 
 const ExceptionBody = Schema.Struct({
