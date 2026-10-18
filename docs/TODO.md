@@ -102,21 +102,44 @@ oversight. Model both halves together or neither.
 ## Other `ConverseRequest` fields
 
 The Smithy model gives Converse and ConverseStream the same 13 request members.
-`ConverseRequest` in `AmazonBedrockSchema.ts` models seven of them: `modelId`, `messages`,
-`system`, `toolConfig`, `inferenceConfig`, `additionalModelRequestFields`, and `outputConfig`. The
-section above covers `additionalModelResponseFieldPaths`. The other five are not modelled:
-`guardrailConfig`, `promptVariables`, `requestMetadata`, `performanceConfig`, and `serviceTier`.
+`ConverseRequest` in `AmazonBedrockSchema.ts` models eight of them: `modelId`, `messages`,
+`system`, `toolConfig`, `inferenceConfig`, `additionalModelRequestFields`, `outputConfig`, and
+`guardrailConfig`. The section above covers `additionalModelResponseFieldPaths`. The other four are
+not modelled: `promptVariables`, `requestMetadata`, `performanceConfig`, and `serviceTier`.
 
-`AmazonBedrockLanguageModel.Config` is the encoded `ConverseRequest` without `messages`, `system`,
-and `outputConfig`, with every field optional, so the request config has no key for these five.
+`AmazonBedrockLanguageModel.Config` is the encoded `ConverseStreamRequest` without `messages`,
+`system`, and `outputConfig`, with every field optional, so the request config has no key for these
+four. `ConverseStreamRequest` is `ConverseRequest` with the guardrail config of ConverseStream, which
+adds `streamProcessingMode`.
 It adds its own `outputConfig`, which takes only `effort`, because the provider sets `textFormat`
 for `generateObject`. It also adds `structuredOutputs` and `forcedToolChoice`, which pick how `generateObject`
 asks for the object and are never sent to Bedrock. `make` spreads the config into the request, so a field
 added to `ConverseRequest` reaches Bedrock through `model`, `layer`, and `withConfigOverride` with
 no other change.
 
-`guardrailConfig` would let the live suites provoke the `content_filtered` and
-`guardrail_intervened` stop reasons, which are still mapped from the Smithy model alone.
+## Guardrails
+
+`guardrailConfig`, the trace on the finish part, and `guardContent` are modelled, and
+`docs/design/2026-10-18-bedrock-guardrails-design.md` gives the design. The live suite
+`test/live/AmazonBedrockGuardrails.integration.test.ts` ran green on 2026-10-18 against a guardrail of
+word and regex filters in `eu-west-1`. These gaps remain:
+
+- `ApplyGuardrail`, which evaluates content without a model call, is not modelled.
+- The `promptRouter` member of the trace reaches the caller only in the raw `trace`.
+- The type requires `guardrailIdentifier` and `guardrailVersion`, though the Smithy model does not.
+  Whether a request can ask for the trace of an account or organization enforced guardrail without
+  naming one is unchecked, and `guardrailOutcome` reading such a guardrail's trace is tested only
+  against a stubbed fixture.
+- A masked answer finishes as `"content-filter"`, so Effect does not run the tool handlers of that
+  response.
+- Contextual grounding, content filters, denied topics, PII entities, and guarded images cost money
+  per evaluation, so no live run covers them. Only the `wordPolicy` and regex
+  `sensitiveInformationPolicy` paths have run live.
+- What `trace: "enabled_full"` adds is undocumented and unobserved.
+- Whether Converse rejects or ignores `streamProcessingMode` is unknown. The provider never sends it
+  to Converse.
+- A guarded assistant text part fails with `InvalidUserInputError`. AWS documents `guardContent`
+  only in user and system content, and nobody has tried an assistant one.
 
 ## How `generateObject` chooses its path
 
@@ -201,7 +224,7 @@ as an image block with no usable content rather than surfacing the reason.
 ---
 
 Other `ContentBlock` union members remain unmodelled and decode-and-ignore by design: `audio`,
-`guardContent`, `searchResult`, `toolAddition`, `toolRemoval`. So are the `web` and
+`searchResult`, `toolAddition`, `toolRemoval`. So are the `web` and
 `searchResultLocation` members of `CitationLocation`, which accompany search results the provider
 cannot send; such a citation is dropped rather than attributed to a document.
 The `systemTool` member of the `Tool` union is likewise unmodelled: it selects Bedrock-hosted tools
@@ -276,10 +299,18 @@ accepts. Nothing observed so far produces `MissingAuthenticationTokenException` 
 table entry may be dead weight inherited from the AWS-wide error set, and it is left in
 place because a wrong mapping costs more than an unused one.
 
-**Still open.** The remaining six stop reasons stay mapped from the Smithy model alone. `stop_sequence`
-is provokable and shares its target (`stop`) with `end_turn`; `content_filtered` and
-`guardrail_intervened` need a configured guardrail; the two `malformed_*` reasons need a
-model that misbehaves on demand. `generateObject` sends one of three request shapes. The live
+`guardrail_intervened` is observed too, on 2026-10-18, for a blocked input, a blocked output, and a
+masked output, over Converse and over ConverseStream in both processing modes. A blocked input
+came back with zero usage and the guardrail's blocked message as the text. In `sync` streaming the
+only text delta was the blocked message. In `async` streaming the blocked word arrived as a delta,
+and only the finish part reported the block. A wrong guardrail version is a
+`ValidationException`, "The guardrail identifier or version provided in the request does not
+exist.", which the provider reports as `InvalidRequestError`.
+
+**Still open.** The remaining five stop reasons stay mapped from the Smithy model alone. `stop_sequence`
+is provokable and shares its target (`stop`) with `end_turn`; `content_filtered` is undefined by
+AWS and reported elsewhere as a refusal by the model's own classifier, which no guardrail causes;
+the two `malformed_*` reasons need a model that misbehaves on demand. `generateObject` sends one of three request shapes. The live
 suite has a check for two of them, which has not run since Opus 5.5 moved to the native path:
 native `outputConfig.textFormat` on Sonnet 4.5 and Opus 5.5, and an unforced `{ auto: {} }` object
 tool on Opus 5.5 with `structuredOutputs: false`, since Opus 5.5 rejects a forced `toolChoice` on

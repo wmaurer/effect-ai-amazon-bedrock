@@ -1,6 +1,6 @@
 # Amazon Bedrock guardrails (0.4.0)
 
-Status: design. Nothing is implemented. 0.3.0 is on npm, and the data retention hint waits under `## Unreleased` in the CHANGELOG for this release.
+Status: implemented on the branch `feat/guardrails-0.4.0`, with unit tests against a stubbed `HttpClient`. Plan step 5, the live check, passed on 2026-10-18, and step 6 was not needed. Step 8, the release, has not started. 0.3.0 is on npm, and the data retention hint waits under `## Unreleased` in the CHANGELOG for this release.
 
 ## Problem
 
@@ -234,6 +234,17 @@ A blocked input runs no model. Each other test sends one short request with a lo
 - `"content-filter"` is an incomplete finish in Effect 4.0.5. `AiError.ContentPolicyError` exists, with its own `ContentPolicyErrorMetadata` interface. Source: `effect/src/ai/LanguageModel.ts`, `effect/src/ai/AiError.ts`.
 - Prior art: the AI SDK spreads untyped provider options into the body, so it sends `streamProcessingMode` to Converse too. It puts the trace unparsed in finish provider metadata and offers `guardContent` on user text and image parts. Source: `.repos/refs/vercel-ai/packages/amazon-bedrock/src/`. Pydantic AI copies the boto3 Converse config into both operations, keeps the trace and the raw stop reason in `provider_details`, and has no `guardContent`. A recorded live call shows that `DRAFT` works from Converse. Source: `.repos/refs/pydantic-ai/`.
 
+## Facts observed live on 2026-10-18
+
+The live suite ran against the guardrail `effect-ai-bedrock-live` in `eu-west-1`, version `DRAFT`, with the default Sonnet 4.5 EU inference profile. All 12 tests passed, and so did the other 27 live tests.
+
+- An EU inference profile accepts a guardrail in `eu-west-1` that has no cross-region setting.
+- A blocked input comes back with zero usage, `BLOCKED_INPUT_MESSAGE` as the text, and a trace whose `inputAssessment` is keyed by the guardrail id and holds `wordPolicy.customWords[].action: "BLOCKED"`, with `actionReason: "Guardrail blocked."` and `modelOutput: []`.
+- The regex filter's `ANONYMIZE` gives `guardrail_intervened` and the text `ticket {ticket}`.
+- In `sync` streaming, the only text delta of a blocked output is `BLOCKED_OUTPUT_MESSAGE`. In `async` streaming, the blocked word `Canberra` arrives as a delta, and only the finish part reports the block.
+- A request with `guardContent` on one part is not blocked for a blocked word in an unguarded part. An unguarded system prompt with a blocked word is not evaluated, and a guarded one is blocked.
+- A wrong guardrail version fails with HTTP 400 `ValidationException`: "The guardrail identifier or version provided in the request does not exist." The message names the setting, so step 6 added no hint.
+
 ## How the design was chosen
 
 Two independent sketches, one from Opus and one from Sonnet, agreed on most of the design. Both put `guardrailConfig` in the AWS shape in `Config`, keep `streamProcessingMode` off Converse, and leave the trace as JSON on the finish part next to a computed outcome. Both keep `"content-filter"`, ship `guardContent` in 0.4.0, and give `generateObject` an error that is not retryable on a block. A Sonnet judge scored them against a six-part rubric and chose the Opus sketch as the base, 24 to 22.
@@ -273,6 +284,6 @@ Each step ends in a check. Work on the branch `feat/guardrails-0.4.0`, and commi
 3. Fail `generateObject` with `ContentPolicyError`, and add the `ContentPolicyErrorMetadata` augmentation. `makeResponse` gains `AiError` in its error channel. Check: a blocked response fails with `ContentPolicyError` on the native path and on the object tool path, a masked JSON response decodes, and `isRetryable` is false.
 4. Add `GuardableOptions`, the file option, the block builders, and their validation in `prepareMessages`. Check: tests for a guarded user text part with `true` and with qualifiers, a guarded system message, a cache point after a guarded block, a png with bytes, and an `InvalidUserInputError` for `s3://`, gif, `image/*`, a pdf, and an assistant text part. `pnpm check` and `pnpm lint`.
 5. Write `test/live/guardrail.json`, the live suite, and its section of `test/live/README.md`. Create the guardrail in `eu-west-1`, with the operator's approval of the command. Run `pnpm test:live`. Check: the suite passes, it skips without `BEDROCK_GUARDRAIL_ID`, and the observed facts go into this record.
-6. If the run shows a wrong-version message that does not name the guardrail setting, add a hint for it, with a unit test that uses the observed message. Check: `pnpm test`.
+6. Not needed: the observed message names the guardrail setting. If the run shows a wrong-version message that does not name the guardrail setting, add a hint for it, with a unit test that uses the observed message. Check: `pnpm test`.
 7. Update the docs. The README gets a section "Apply a guardrail", with the trace warning and the `guardContent` rule in its first sentences. The CHANGELOG 0.4.0 entry names these changes in behaviour: every finish part has `metadata.amazonBedrock`, `generateObject` fails with `ContentPolicyError` on a guardrail block (which an enforced guardrail can cause in 0.3.0 too), and `converseStream` takes `ConverseStreamRequest`. `docs/TODO.md` moves `guardrailConfig` out of "Other `ConverseRequest` fields", takes `guardContent` off the list of ignored blocks, and records `guardrail_intervened` as observed. `content_filtered` stays unobserved.
 8. Run the four checks in `AGENTS.md` ("Before you claim work is done"), then the release steps.

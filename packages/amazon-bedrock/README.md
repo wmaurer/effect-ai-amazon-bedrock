@@ -325,6 +325,79 @@ export const Opus = AmazonBedrockLanguageModel.model(
 )
 ```
 
+## Apply a guardrail
+
+Create the guardrail in Amazon Bedrock first, in the region of your requests. This package does not create one. Then name it in `guardrailConfig`:
+
+```ts
+import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
+
+export const Guarded = AmazonBedrockLanguageModel.model("eu.anthropic.claude-sonnet-4-5-20250929-v1:0", {
+  guardrailConfig: {
+    guardrailIdentifier: "abc123xyz",
+    guardrailVersion: "1",
+    trace: "enabled"
+  }
+})
+```
+
+`guardrailVersion` is a version number or `"DRAFT"`. `streamProcessingMode`, `"sync"` or `"async"`, applies to `streamText` only, and `generateText` does not send it. In `"async"` mode the text arrives before the guardrail has evaluated it. A live run on 2026-10-18 streamed the blocked word before the finish part reported the block. In `"sync"` mode, the default, the same request streamed only the blocked message. An override replaces the whole `guardrailConfig`, and `AmazonBedrockLanguageModel.withConfigOverride({ guardrailConfig: undefined })` turns the guardrail off for one request.
+
+When the guardrail blocks, Bedrock answers with the blocked message that the guardrail configures as the response text, and the finish reason is `"content-filter"`. A blocked input costs no model tokens. Every finish part, on `generateText` and on `streamText`, holds `metadata.amazonBedrock`:
+
+- `stopReason` is the Converse stop reason as Bedrock sent it. It tells `guardrail_intervened` from `content_filtered`, which both give `"content-filter"`. AWS does not define `content_filtered`. Reports from other projects say Converse sends it when the model's own classifier refuses, with no guardrail involved.
+- `guardrail` is `{ input, output, policies }` when the response holds a guardrail trace, and `null` otherwise. `input` and `output` are `"blocked"`, `"masked"`, or `"none"`. A masked answer is usable, with the sensitive values replaced, and it also has the stop reason `guardrail_intervened`. `policies` names the policies that acted, such as `"wordPolicy"`.
+- `trace` is the Converse trace as Bedrock sent it, or `null`.
+
+Bedrock returns the trace only when `trace` is `"enabled"` or `"enabled_full"`. The trace holds the text that a policy matched, unmasked, so it reaches anything that logs or stores the response parts.
+
+```ts
+import { Effect } from "effect"
+import { LanguageModel } from "effect/ai"
+
+export const answer = Effect.gen(function*() {
+  const response = yield* LanguageModel.generateText({ prompt: "What is the capital of Australia?" })
+  const bedrock = response.content.find((part) => part.type === "finish")?.metadata.amazonBedrock
+  if (bedrock?.guardrail?.output === "blocked") {
+    return "The guardrail blocked the answer."
+  }
+  return response.text
+})
+```
+
+`generateObject` fails with an `AiError` whose reason is `ContentPolicyError` when the guardrail intervened and the response holds no JSON. Its `metadata.amazonBedrock` is that of the finish part. The error is not retryable, because a retry meets the same block. A masked object is still JSON, and `generateObject` decodes it as usual.
+
+### Choose what the guardrail evaluates
+
+Without `guardContent`, the guardrail evaluates every message but not the system prompt. Once any part of a request has `guardContent`, the guardrail evaluates only the parts that have it. The model still reads every part. `guardContent` goes on a user text part, a system message, or a user file part with a PNG or JPEG image given as base64 or a `Uint8Array`. Any other part with it fails with `InvalidUserInputError`. On text, `qualifiers` names the role of the text in a contextual grounding check:
+
+```ts
+import { Prompt } from "effect/ai"
+
+declare const policyText: string
+
+export const prompt = Prompt.fromMessages([
+  Prompt.makeMessage("system", {
+    content: "Answer from the policy only.",
+    options: { amazonBedrock: { guardContent: true } }
+  }),
+  Prompt.makeMessage("user", {
+    content: [
+      Prompt.makePart("text", {
+        text: policyText,
+        options: { amazonBedrock: { guardContent: { qualifiers: ["grounding_source"] } } }
+      }),
+      Prompt.makePart("text", {
+        text: "Can I get a refund after 45 days?",
+        options: { amazonBedrock: { guardContent: { qualifiers: ["query"] } } }
+      })
+    ]
+  })
+])
+```
+
+The option stays on the part, so in a `Chat` a guarded turn is evaluated again on every later turn.
+
 ## Set Bedrock options on a prompt
 
 The provider reads its options from the `amazonBedrock` key of the `options` field on prompt messages and parts.
@@ -402,10 +475,11 @@ Converse has features that this provider does not model yet:
 - Video blocks. A `video/*` file part fails with `InvalidUserInputError`.
 - Documents given as pre-chunked `content`.
 - The `error` field of an image block.
-- The `audio`, `guardContent`, `searchResult`, `toolAddition`, and `toolRemoval` content blocks, which the provider decodes and ignores.
+- The `audio`, `searchResult`, `toolAddition`, and `toolRemoval` content blocks, which the provider decodes and ignores.
 - Citations with a `web` or `searchResultLocation` location, which the provider drops.
 - System tools, which run on Bedrock.
-- The Converse request fields `guardrailConfig`, `promptVariables`, `requestMetadata`, `performanceConfig`, and `serviceTier`. The request config has no key for them.
+- The Converse request fields `promptVariables`, `requestMetadata`, `performanceConfig`, and `serviceTier`. The request config has no key for them.
+- The `ApplyGuardrail` operation, which evaluates content without a model call.
 
 `LanguageModel.streamText` always asks for text, so streamed structured output is not available. That limit is in `effect/ai`, not in this provider.
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Amazon Bedrock guardrails are supported. Every finish part now carries `metadata.amazonBedrock`, also without a guardrail.
+
+- Add `guardrailConfig` to the request config. `generateText` and `generateObject` send it to Converse without `streamProcessingMode`, which only ConverseStream has, and `streamText` sends it as given. An override replaces the whole object, and `guardrailConfig: undefined` turns a layer's guardrail off for one request.
+- Put `metadata.amazonBedrock` on every finish part, on `generateText` and on `streamText`. `stopReason` is the Converse stop reason as Bedrock sent it, so `guardrail_intervened` and `content_filtered` can be told apart, though both still finish with `"content-filter"`. `guardrail` says whether a guardrail blocked or masked the input and the output, read from the trace, and `trace` is the trace as Bedrock sent it. Both are `null` unless the guardrail config enables the trace.
+- Fail `generateObject` with an `AiError` whose reason is `ContentPolicyError` when a guardrail intervened and the response holds no JSON. In 0.3.0 the blocked message reached the JSON decoder, which failed with a retryable `StructuredOutputError`. A guardrail that the account or organization enforces can cause this without any `guardrailConfig` in the request.
+- Add the `guardContent` option to user text parts, system messages, and user PNG and JPEG file parts. Once a part has it, the guardrail evaluates only the parts that have it. On text, `qualifiers` names the role of the text in a contextual grounding check. Any other part with the option fails with `InvalidUserInputError`.
+- `AmazonBedrockClient.Service.converseStream` takes the new `ConverseStreamRequest`, and `Config` is derived from it. The new schemas `GuardrailConfiguration`, `GuardrailStreamConfiguration`, and `GuardrailConverseContentBlock` follow the Smithy shapes, and `ConverseResponse` and `ConverseStreamMetadataEvent` decode `trace`.
 - Name the account data retention setting in the `InvalidRequestError` when Bedrock rejects a model with `data retention mode '<mode>' is not available for this model`. Claude Fable 5 and 5.1 need the mode `aws_review`, and the Converse API has no request field for it, so the AWS message alone did not say how to make the model callable. The README section "Choose a model" explains the setting.
 
 ## 0.3.0
