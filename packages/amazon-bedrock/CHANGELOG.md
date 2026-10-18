@@ -1,5 +1,9 @@
 # @wmaurer/effect-ai-amazon-bedrock
 
+## Unreleased
+
+- Name the account data retention setting in the `InvalidRequestError` when Bedrock rejects a model with `data retention mode '<mode>' is not available for this model`. Claude Fable 5 and 5.1 need the mode `aws_review`, and the Converse API has no request field for it, so the AWS message alone did not say how to make the model callable. The README section "Choose a model" explains the setting.
+
 ## 0.3.0
 
 `generateObject` asks models outside Anthropic for the object through a tool. In 0.2.0 it sent them `outputConfig.textFormat`, which Nova, Mistral Large 2402, Pixtral Large, Llama, and Palmyra answered with a 400 in probes in `eu-west-1` and `us-east-1`, so `generateObject` on these models failed unless you set `structuredOutputs: false`.

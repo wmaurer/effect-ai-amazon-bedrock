@@ -159,14 +159,21 @@ lists. The rows follow what they saw. These parts of the rule they could not che
   Llama, or another model that rejects `outputConfig` gets a 400 from `generateObject` until the
   caller sets `structuredOutputs: false`.
 
-## Fable 5 and 5.1 reject every request
+## Fable 5 and 5.1 need an account data retention mode
 
 In the same probe, Bedrock answered every request to `global.anthropic.claude-fable-5` and
 `global.anthropic.claude-fable-5-1` with a `ValidationException`: `The model returned the following
-errors: data retention mode 'default' is not available for this model`. The requests carried no
-data retention setting, and the Bedrock Runtime Smithy model in `.repos/refs/api-models-aws` has no
-field that names one. Which account setting, inference profile, or request field makes these models
-usable is open.
+errors: data retention mode 'default' is not available for this model`. AWS's
+[data retention guide](https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html)
+says these models need the account's mode in the region to be `aws_review` or `provider_data_share`,
+and that the Converse API takes no mode in the request. The mode is set with the control-plane
+`PutAccountDataRetention` operation, which is in the Bedrock Smithy model in `.repos/refs/api-models-aws`.
+The provider adds a pointer to that setting to the error. These gaps remain:
+
+- No probe has run on an account with `aws_review`, so the provider's assumption that Fable 5.1
+  rejects a forced `toolChoice` is unchecked.
+- The hint matches the AWS message text, which AWS can change. A changed message loses the hint,
+  and the `InvalidRequestError` still carries the AWS message.
 
 ## Video blocks
 

@@ -220,8 +220,22 @@ const buildInvalidRequestDescription = (params: {
     parts.push(`Response: ${truncated}`)
   }
 
+  if (params.message && dataRetentionRejection.test(params.message)) {
+    parts.push(dataRetentionHint)
+  }
+
   return parts.join(" ")
 }
+
+// Converse has no request field for the data retention mode, so the AWS message
+// alone leaves the reader looking for one. Only an account-level setting in each
+// region, which the control plane sets, makes such a model callable.
+const dataRetentionRejection = /data retention mode '[^']*' is not available for this model/
+
+const dataRetentionHint = "The account's data retention mode in this region does not allow this model." +
+  " Claude Fable 5 and 5.1 need `aws_review`." +
+  " Set the mode with the Bedrock PutAccountDataRetention operation:" +
+  " https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html"
 
 /**
  * AWS sends the exception shape as `Name:http://internal.amazon.com/coral/...`.
