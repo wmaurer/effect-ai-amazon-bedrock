@@ -1,13 +1,3 @@
-/**
- * Live guardrail checks against real Amazon Bedrock.
- *
- * They run against the guardrail that `guardrail.json` defines, which the operator creates
- * once and names in `BEDROCK_GUARDRAIL_ID`. The suite creates and deletes no AWS resource,
- * and it skips when `BEDROCK_GUARDRAIL_ID` is unset.
- *
- * See ./README.md — this whole directory is temporary and comes out before the branch is
- * squashed for the upstream PR.
- */
 import { assert, describe, it } from "@effect/vitest"
 import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
 import { Effect, Redacted, Schema, Stream } from "effect"
@@ -19,7 +9,6 @@ const TIMEOUT = 120_000
 const GUARDRAIL_ID = process.env.BEDROCK_GUARDRAIL_ID
 const GUARDRAIL_VERSION = process.env.BEDROCK_GUARDRAIL_VERSION ?? "DRAFT"
 
-// The messages that guardrail.json configures.
 const BLOCKED_INPUT = "BLOCKED_INPUT_MESSAGE"
 const BLOCKED_OUTPUT = "BLOCKED_OUTPUT_MESSAGE"
 

@@ -90,7 +90,6 @@ const invocationMetrics = {
   guardrailCoverage: { textCharacters: { guarded: 36, total: 36 } }
 }
 
-/** A Converse trace in the shape of the Smithy model: a word filter blocked the input. */
 export const inputBlockedTrace = {
   guardrail: {
     modelOutput: [],
@@ -105,7 +104,6 @@ export const inputBlockedTrace = {
   }
 }
 
-/** A Converse trace in the shape of the Smithy model: a regex filter masked the output. */
 export const outputMaskedTrace = {
   guardrail: {
     modelOutput: ["ticket {TICKET}"],
