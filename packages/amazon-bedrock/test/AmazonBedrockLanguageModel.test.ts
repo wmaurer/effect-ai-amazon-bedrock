@@ -2759,4 +2759,211 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(response.text, "BLOCKED_INPUT_MESSAGE")
       }))
   })
+
+  describe("guardContent", () => {
+    const sendPrompt = (prompt: Prompt.RawInput) =>
+      Effect.gen(function*() {
+        const captured: Array<HttpClientRequest.HttpClientRequest> = []
+        yield* LanguageModel.generateText({ prompt }).pipe(
+          Effect.provide(layersFor((request) => {
+            captured.push(request)
+            return Effect.succeed(jsonResponse(request, {
+              output: { message: { role: "assistant", content: [{ text: "done" }] } },
+              usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+              stopReason: "end_turn"
+            }))
+          }))
+        )
+        return yield* getRequestBody(captured[0]!)
+      })
+
+    const rejection = (prompt: Prompt.RawInput) =>
+      LanguageModel.generateText({ prompt }).pipe(
+        Effect.provide(layersFor(() => Effect.die(new Error("no request expected")))),
+        Effect.flip,
+        Effect.map((error) => ({
+          tag: error.reason._tag,
+          description: error.reason._tag === "InvalidUserInputError" ? error.reason.description : undefined
+        }))
+      )
+
+    const guarded = { amazonBedrock: { guardContent: true } } as const
+
+    it.effect("guards a user text part", () =>
+      Effect.gen(function*() {
+        const body = yield* sendPrompt([{
+          role: "user",
+          content: [
+            { type: "text", text: "Plain" },
+            { type: "text", text: "Guarded", options: guarded }
+          ]
+        }])
+
+        assert.deepStrictEqual(body.messages, [{
+          role: "user",
+          content: [{ text: "Plain" }, { guardContent: { text: { text: "Guarded" } } }]
+        }])
+      }))
+
+    it.effect("guards user text parts with grounding qualifiers", () =>
+      Effect.gen(function*() {
+        const body = yield* sendPrompt([{
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Refunds within 30 days.",
+              options: { amazonBedrock: { guardContent: { qualifiers: ["grounding_source"] } } }
+            },
+            {
+              type: "text",
+              text: "Can I get a refund after 45 days?",
+              options: { amazonBedrock: { guardContent: { qualifiers: ["query"] } } }
+            }
+          ]
+        }])
+
+        assert.deepStrictEqual(body.messages[0].content, [
+          { guardContent: { text: { text: "Refunds within 30 days.", qualifiers: ["grounding_source"] } } },
+          { guardContent: { text: { text: "Can I get a refund after 45 days?", qualifiers: ["query"] } } }
+        ])
+      }))
+
+    it.effect("guards a system message and keeps an unguarded one plain", () =>
+      Effect.gen(function*() {
+        const body = yield* sendPrompt([
+          { role: "system", content: "Answer from the documents.", options: guarded },
+          { role: "system", content: "Be brief." },
+          { role: "user", content: "Q" }
+        ])
+
+        assert.deepStrictEqual(body.system, [
+          { guardContent: { text: { text: "Answer from the documents." } } },
+          { text: "Be brief." }
+        ])
+      }))
+
+    it.effect("puts a cache point after a guarded block", () =>
+      Effect.gen(function*() {
+        const body = yield* sendPrompt([
+          {
+            role: "system",
+            content: "Preamble",
+            options: { amazonBedrock: { guardContent: true, cachePoint: { type: "default" } } }
+          },
+          {
+            role: "user",
+            content: [{
+              type: "text",
+              text: "Guarded",
+              options: { amazonBedrock: { guardContent: true, cachePoint: { type: "default" } } }
+            }]
+          }
+        ])
+
+        assert.deepStrictEqual(body.system, [
+          { guardContent: { text: { text: "Preamble" } } },
+          { cachePoint: { type: "default" } }
+        ])
+        assert.deepStrictEqual(body.messages[0].content, [
+          { guardContent: { text: { text: "Guarded" } } },
+          { cachePoint: { type: "default" } }
+        ])
+      }))
+
+    it.effect("guards a png image given as bytes", () =>
+      Effect.gen(function*() {
+        const body = yield* sendPrompt([{
+          role: "user",
+          content: [{ type: "file", mediaType: "image/png", data: new Uint8Array([1, 2, 3]), options: guarded }]
+        }])
+
+        assert.deepStrictEqual(body.messages[0].content, [
+          { guardContent: { image: { format: "png", source: { bytes: "AQID" } } } }
+        ])
+      }))
+
+    it.effect("guards a jpeg image given as base64", () =>
+      Effect.gen(function*() {
+        const body = yield* sendPrompt([{
+          role: "user",
+          content: [{ type: "file", mediaType: "image/jpeg", data: "AQID", options: guarded }]
+        }])
+
+        assert.deepStrictEqual(body.messages[0].content, [
+          { guardContent: { image: { format: "jpeg", source: { bytes: "AQID" } } } }
+        ])
+      }))
+
+    it.effect("rejects a guarded image at an s3 location", () =>
+      Effect.gen(function*() {
+        const result = yield* rejection([{
+          role: "user",
+          content: [{ type: "file", mediaType: "image/png", data: "s3://bucket/a.png", options: guarded }]
+        }])
+
+        assert.deepStrictEqual(result, {
+          tag: "InvalidUserInputError",
+          description: "Unsupported guardContent on an image at 's3://bucket/a.png' - a guarded image must be " +
+            "sent as bytes or base64, not as an s3:// location"
+        })
+      }))
+
+    it.effect("rejects a guarded gif", () =>
+      Effect.gen(function*() {
+        const result = yield* rejection([{
+          role: "user",
+          content: [{ type: "file", mediaType: "image/gif", data: "AQID", options: guarded }]
+        }])
+
+        assert.deepStrictEqual(result, {
+          tag: "InvalidUserInputError",
+          description: "Unsupported guardContent on a file part of media type 'image/gif' - a guarded image must " +
+            "be image/png or image/jpeg"
+        })
+      }))
+
+    it.effect("rejects a guarded image/* part", () =>
+      Effect.gen(function*() {
+        const result = yield* rejection([{
+          role: "user",
+          content: [{ type: "file", mediaType: "image/*", data: "AQID", options: guarded }]
+        }])
+
+        assert.deepStrictEqual(result, {
+          tag: "InvalidUserInputError",
+          description: "Unsupported guardContent on a file part of media type 'image/*' - its format is unknown, " +
+            "and a guarded image must be image/png or image/jpeg"
+        })
+      }))
+
+    it.effect("rejects a guarded pdf", () =>
+      Effect.gen(function*() {
+        const result = yield* rejection([{
+          role: "user",
+          content: [{ type: "file", mediaType: "application/pdf", data: "AQID", options: guarded }]
+        }])
+
+        assert.deepStrictEqual(result, {
+          tag: "InvalidUserInputError",
+          description: "Unsupported guardContent on a file part of media type 'application/pdf' - only text parts " +
+            "and png or jpeg images can be guarded"
+        })
+      }))
+
+    it.effect("rejects a guarded assistant text part", () =>
+      Effect.gen(function*() {
+        const result = yield* rejection([
+          { role: "user", content: "Q" },
+          { role: "assistant", content: [{ type: "text", text: "A", options: guarded }] },
+          { role: "user", content: "Q2" }
+        ])
+
+        assert.deepStrictEqual(result, {
+          tag: "InvalidUserInputError",
+          description: "Unsupported guardContent on an assistant text part - this provider guards only user " +
+            "text parts, user png and jpeg images, and system messages"
+        })
+      }))
+  })
 })

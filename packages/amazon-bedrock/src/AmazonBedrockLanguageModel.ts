@@ -20,7 +20,11 @@
  * loudly with `AiError.InvalidUserInputError` rather than silently dropping
  * content. Prompt caching is opt-in per message or per part via provider
  * options. Citations are opt-in per document, and the citation blocks and
- * deltas Converse returns are surfaced as document source parts.
+ * deltas Converse returns are surfaced as document source parts. A guardrail
+ * applies through `Config.guardrailConfig`, and `guardContent` options on text
+ * parts, png and jpeg file parts, and system messages choose what it
+ * evaluates. Every finish part reports the raw stop reason and, when the trace
+ * is enabled, what the guardrail did.
  *
  * @stability unstable
  * @since 0.1.0
@@ -57,6 +61,9 @@ import type {
   ConverseStreamRequest,
   DocumentBlock,
   DocumentSource,
+  GuardrailConverseContentBlock,
+  GuardrailConverseContentQualifier,
+  GuardrailConverseImageBlock,
   GuardrailStreamConfiguration,
   ImageBlock,
   MediaSource,
@@ -153,15 +160,6 @@ interface CachePointOptions {
 
 declare module "effect/ai/Prompt" {
   /**
-   * Amazon Bedrock options for system messages.
-   *
-   * @stability unstable
-   * @category models
-   * @since 0.1.0
-   */
-  export interface SystemMessageOptions extends CachePointOptions {}
-
-  /**
    * Amazon Bedrock options for user messages.
    *
    * @stability unstable
@@ -187,15 +185,6 @@ declare module "effect/ai/Prompt" {
    * @since 0.1.0
    */
   export interface ToolMessageOptions extends CachePointOptions {}
-
-  /**
-   * Amazon Bedrock options for text prompt parts.
-   *
-   * @stability unstable
-   * @category models
-   * @since 0.1.0
-   */
-  export interface TextPartOptions extends CachePointOptions {}
 
   /**
    * Amazon Bedrock options for tool call prompt parts.
@@ -277,6 +266,13 @@ interface FileOptions {
      * Converse cannot cite.
      */
     readonly citations?: Citations | null
+    /**
+     * Sends the image as a `guardContent` image block, for the guardrail to
+     * evaluate. Only an `image/png` or `image/jpeg` part whose data is bytes
+     * or base64 can be guarded. Any other file part with this option fails
+     * the request with `InvalidUserInputError`.
+     */
+    readonly guardContent?: true | null
   } | null
 }
 
@@ -515,6 +511,96 @@ const reasoningTextInfo = (signature: string | undefined): ReasoningInfo => ({
  * @since 0.4.0
  */
 export type GuardrailConfig = typeof GuardrailStreamConfiguration.Encoded
+
+/**
+ * The role a guarded text part plays in a contextual grounding check.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.4.0
+ */
+export type GuardContentQualifier = typeof GuardrailConverseContentQualifier.Type
+
+/**
+ * Marks a text part or a system message for the guardrail to evaluate.
+ *
+ * **Details**
+ *
+ * `true` guards the text. `qualifiers` names its role in a contextual
+ * grounding check: the source documents are `grounding_source`, and the
+ * question is `query`. Once any part of a request is guarded, the guardrail
+ * evaluates only the guarded parts. The model still reads every part.
+ *
+ * The option stays on the part, so in a chat a guarded turn is evaluated
+ * again on every later turn.
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.4.0
+ */
+export type GuardContent = true | {
+  readonly qualifiers: ReadonlyArray<GuardContentQualifier>
+}
+
+/**
+ * The provider options of the prompt content a guardrail can evaluate as
+ * text.
+ *
+ * **Details**
+ *
+ * Text parts and system messages share this interface, because two base
+ * interfaces of one augmentation cannot both declare `amazonBedrock`.
+ */
+interface GuardableOptions {
+  readonly amazonBedrock?: {
+    /**
+     * Marks the end of the reusable prefix of the request. The cache point is
+     * emitted after the content this is attached to.
+     */
+    readonly cachePoint?: CachePoint | null
+    /**
+     * Sends the text as a `guardContent` block, for the guardrail to evaluate.
+     * Honoured on user text parts and system messages. On an assistant text
+     * part it fails the request with `InvalidUserInputError`.
+     */
+    readonly guardContent?: GuardContent | null
+  } | null
+}
+
+declare module "effect/ai/Prompt" {
+  /**
+   * Amazon Bedrock options for system messages.
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.1.0
+   */
+  export interface SystemMessageOptions extends GuardableOptions {}
+
+  /**
+   * Amazon Bedrock options for text prompt parts.
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.1.0
+   */
+  export interface TextPartOptions extends GuardableOptions {}
+}
+
+/**
+ * Builds the block for a text part or a system message: plain text, or
+ * guarded text when the options ask for it.
+ */
+const textBlock = (
+  text: string,
+  options: GuardableOptions
+): { readonly text: string } | { readonly guardContent: typeof GuardrailConverseContentBlock.Encoded } => {
+  const guard = options.amazonBedrock?.guardContent
+  if (Predicate.isNullish(guard)) {
+    return { text }
+  }
+  return { guardContent: { text: guard === true ? { text } : { text, qualifiers: guard.qualifiers } } }
+}
 
 /**
  * What a guardrail did to one side of the exchange.
@@ -1038,6 +1124,55 @@ const documentName = (fileName: string | undefined, position: number): string =>
   return `document ${position}`
 }
 
+/** The Smithy model allows a guarded image only as png or jpeg bytes. */
+const guardedImageFormats: Record<string, typeof GuardrailConverseImageBlock.Encoded["format"]> = {
+  "image/jpeg": "jpeg",
+  "image/png": "png"
+}
+
+/**
+ * Builds the guarded image block of a file part that sets `guardContent`.
+ *
+ * **Details**
+ *
+ * Fails with `InvalidUserInputError` for a media type other than `image/png`
+ * or `image/jpeg`, `image/*` included, whose real format is unknown, and for
+ * an `s3://` source, which a guarded image cannot have.
+ */
+const guardedImage: (
+  part: Prompt.FilePart
+) => Effect.Effect<typeof GuardrailConverseImageBlock.Encoded, AiError.AiError> = Effect.fnUntraced(
+  function*(part) {
+    const format = guardedImageFormats[part.mediaType]
+    if (Predicate.isUndefined(format)) {
+      const reason = part.mediaType === "image/*"
+        ? "its format is unknown, and a guarded image must be image/png or image/jpeg"
+        : part.mediaType.startsWith("image/")
+        ? "a guarded image must be image/png or image/jpeg"
+        : "only text parts and png or jpeg images can be guarded"
+      return yield* AiError.make({
+        module: "AmazonBedrockLanguageModel",
+        method: "prepareMessages",
+        reason: new AiError.InvalidUserInputError({
+          description: `Unsupported guardContent on a file part of media type '${part.mediaType}' - ${reason}`
+        })
+      })
+    }
+    const source = yield* fileSource(part.data)
+    if (Predicate.isUndefined(source.bytes)) {
+      return yield* AiError.make({
+        module: "AmazonBedrockLanguageModel",
+        method: "prepareMessages",
+        reason: new AiError.InvalidUserInputError({
+          description: `Unsupported guardContent on an image at '${source.s3Location?.uri}' - a guarded image ` +
+            "must be sent as bytes or base64, not as an s3:// location"
+        })
+      })
+    }
+    return { format, source: { bytes: source.bytes } }
+  }
+)
+
 const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect<{
   readonly system: ReadonlyArray<typeof SystemContentBlock.Encoded>
   readonly messages: ReadonlyArray<typeof Message.Encoded>
@@ -1069,7 +1204,7 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
             })
           }
           for (const message of group.messages) {
-            system.push({ text: message.content })
+            system.push(textBlock(message.content, message.options))
             const cachePoint = getCachePoint(message)
             if (Predicate.isNotNull(cachePoint)) {
               system.push({ cachePoint })
@@ -1086,9 +1221,14 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
               case "user": {
                 for (const part of message.content) {
                   if (part.type === "text") {
-                    content.push({ text: part.text })
+                    content.push(textBlock(part.text, part.options))
                     pushCachePoint(content, part)
                   } else if (part.type === "file") {
+                    if (part.options.amazonBedrock?.guardContent === true) {
+                      content.push({ guardContent: { image: yield* guardedImage(part) } })
+                      pushCachePoint(content, part)
+                      continue
+                    }
                     const imageFormat = imageFormats[part.mediaType]
                     if (Predicate.isNotUndefined(imageFormat)) {
                       content.push({ image: { format: imageFormat, source: yield* fileSource(part.data) } })
@@ -1184,6 +1324,19 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
               const isLastPart = k === message.content.length - 1
 
               if (part.type === "text") {
+                // AWS documents guardContent only in user and system content.
+                // Allowing it here later breaks no program, and taking it away
+                // later would.
+                if (!Predicate.isNullish(part.options.amazonBedrock?.guardContent)) {
+                  return yield* AiError.make({
+                    module: "AmazonBedrockLanguageModel",
+                    method: "prepareMessages",
+                    reason: new AiError.InvalidUserInputError({
+                      description: "Unsupported guardContent on an assistant text part - this provider guards only " +
+                        "user text parts, user png and jpeg images, and system messages"
+                    })
+                  })
+                }
                 // Skip empty text blocks
                 if (part.text.trim().length === 0) {
                   continue
