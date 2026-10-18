@@ -575,6 +575,21 @@ export type FinishMetadata = {
   readonly trace: Schema.MutableJson | null
 }
 
+declare module "effect/ai/AiError" {
+  /**
+   * Amazon Bedrock metadata on the `ContentPolicyError` that `generateObject`
+   * fails with when a guardrail blocked the exchange. It is the metadata of
+   * the response's finish part.
+   *
+   * @stability unstable
+   * @category models
+   * @since 0.4.0
+   */
+  export interface ContentPolicyErrorMetadata extends ProviderMetadata {
+    readonly amazonBedrock?: FinishMetadata | null
+  }
+}
+
 declare module "effect/ai/Response" {
   /**
    * Amazon Bedrock metadata on the finish part.
@@ -1447,7 +1462,7 @@ const makeResponse: (
   documents: ReadonlyArray<CitedDocument>
 ) => Effect.Effect<
   Array<Response.PartEncoded>,
-  never,
+  AiError.AiError,
   IdGenerator.IdGenerator
 > = Effect.fnUntraced(function*(request, response, options, nameMapper, documents) {
   const idGenerator = yield* IdGenerator.IdGenerator
@@ -1555,6 +1570,22 @@ const makeResponse: (
     : InternalUtilities.resolveFinishReason(response.stopReason)
   const cacheReadTokens = response.usage.cacheReadInputTokens ?? 0
   const cacheWriteTokens = response.usage.cacheWriteInputTokens ?? 0
+  const metadata = InternalGuardrails.finishMetadata(response.stopReason, response.trace)
+
+  if (options.responseFormat.type === "json") {
+    const text = parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("")
+    if (InternalGuardrails.blocksObject(response.stopReason, text)) {
+      return yield* AiError.make({
+        module: "AmazonBedrockLanguageModel",
+        method: "generateObject",
+        reason: new AiError.ContentPolicyError({
+          description: "An Amazon Bedrock guardrail intervened, and the response holds no JSON object. " +
+            `Bedrock answered: ${truncate(text, 200)}`,
+          metadata: { amazonBedrock: metadata }
+        })
+      })
+    }
+  }
 
   parts.push({
     type: "finish",
@@ -1575,7 +1606,7 @@ const makeResponse: (
     // `Response.FinishPart` models `response` with `Schema.UndefinedOr`, which
     // requires the key; HTTP response details are not surfaced by the client.
     response: undefined,
-    metadata: { amazonBedrock: InternalGuardrails.finishMetadata(response.stopReason, response.trace) }
+    metadata: { amazonBedrock: metadata }
   })
 
   return parts

@@ -87,3 +87,28 @@ export const finishMetadata = (stopReason: string | null, trace: Schema.MutableJ
   guardrail: guardrailOutcome(trace),
   trace: trace ?? null
 })
+
+const isJson = (text: string): boolean => {
+  try {
+    JSON.parse(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether `generateObject` fails with `ContentPolicyError` instead of decoding
+ * the text.
+ *
+ * **Details**
+ *
+ * A blocked response holds the guardrail's blocked message, which is not
+ * JSON, so the rule needs no trace. The decoder would fail with a
+ * `StructuredOutputError`, which is retryable, and a retry pays again for the
+ * same block. A masked object is still JSON and goes on to the decoder.
+ *
+ * @internal
+ */
+export const blocksObject = (stopReason: string, text: string): boolean =>
+  stopReason === "guardrail_intervened" && !isJson(text)
