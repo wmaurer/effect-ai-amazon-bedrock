@@ -11,8 +11,6 @@ const isObject = (value: unknown): value is Schema.MutableJsonObject =>
 const actionOf = (value: string): GuardrailAction =>
   value === "BLOCKED" ? "blocked" : value === "ANONYMIZED" ? "masked" : "none"
 
-// Every string at a key named `action`, at any depth, so that a policy AWS
-// adds later is read without a list of policies to keep in step with Smithy.
 const strongestAction = (value: Schema.MutableJson): GuardrailAction => {
   let action: GuardrailAction = "none"
   if (Array.isArray(value)) {
@@ -47,18 +45,7 @@ const assessSide = (assessments: ReadonlyArray<Schema.MutableJson>, policies: Ar
   return side
 }
 
-/**
- * Reads what the guardrails did from a Converse trace.
- *
- * **Details**
- *
- * `inputAssessment` maps each guardrail to one assessment, and
- * `outputAssessments` maps each guardrail to one assessment per chunk. A
- * member that is missing or has another type counts as nothing found.
- * Returns `null` only when the trace has no `guardrail` object.
- *
- * @internal
- */
+/** @internal */
 export const guardrailOutcome = (trace: Schema.MutableJson | undefined): GuardrailOutcome | null => {
   const guardrail = isObject(trace) ? trace.guardrail : undefined
   if (!isObject(guardrail)) {
@@ -77,11 +64,7 @@ export const guardrailOutcome = (trace: Schema.MutableJson | undefined): Guardra
   return { input, output, policies }
 }
 
-/**
- * Builds the Amazon Bedrock metadata of a finish part, on both response paths.
- *
- * @internal
- */
+/** @internal */
 export const finishMetadata = (stopReason: string | null, trace: Schema.MutableJson | undefined): FinishMetadata => ({
   stopReason,
   guardrail: guardrailOutcome(trace),
@@ -98,15 +81,9 @@ const isJson = (text: string): boolean => {
 }
 
 /**
- * Whether `generateObject` fails with `ContentPolicyError` instead of decoding
- * the text.
- *
- * **Details**
- *
- * A blocked response holds the guardrail's blocked message, which is not
- * JSON, so the rule needs no trace. The decoder would fail with a
- * `StructuredOutputError`, which is retryable, and a retry pays again for the
- * same block. A masked object is still JSON and goes on to the decoder.
+ * Bedrock stops with `guardrail_intervened` both when a guardrail blocks,
+ * replacing the text with the guardrail's blocked message, and when it masks,
+ * leaving the object JSON.
  *
  * @internal
  */

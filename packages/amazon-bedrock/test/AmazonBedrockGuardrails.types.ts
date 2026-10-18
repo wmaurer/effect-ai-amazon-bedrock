@@ -11,8 +11,6 @@ const streamRequest: typeof AmazonBedrockSchema.ConverseStreamRequest.Encoded = 
   guardrailConfig: { guardrailIdentifier: "gr-1", guardrailVersion: "DRAFT", streamProcessingMode: "async" }
 }
 
-// The two wire shapes
-
 export const streamed = client.converseStream({ payload: streamRequest })
 
 export const converse = client.converse({
@@ -21,8 +19,6 @@ export const converse = client.converse({
 
 // @ts-expect-error a ConverseStream request does not fit Converse until the mode is removed
 export const streamToConverse = client.converse({ payload: streamRequest })
-
-// Config
 
 type Config = typeof AmazonBedrockLanguageModel.Config.Service
 
@@ -46,8 +42,6 @@ export const rejected: ReadonlyArray<Config> = [
   // @ts-expect-error a stream processing mode outside the Smithy enum
   { guardrailConfig: { guardrailIdentifier: "gr-1", guardrailVersion: "1", streamProcessingMode: "batch" } }
 ]
-
-// guardContent
 
 export const guardedPrompt = Prompt.make([
   { role: "system", content: "Answer from the documents.", options: { amazonBedrock: { guardContent: true } } },
@@ -82,8 +76,6 @@ export const rejectedOptions = {
   // @ts-expect-error guardContent is true or qualifiers, never false
   system: { amazonBedrock: { guardContent: false } } satisfies Prompt.SystemMessageOptions
 }
-
-// What the guardrail did
 
 export const finishOutcome = LanguageModel.generateText({ prompt: guardedPrompt }).pipe(
   Effect.map((response) => {

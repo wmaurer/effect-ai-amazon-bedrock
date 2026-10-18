@@ -488,10 +488,6 @@ const reasoningTextInfo = (signature: string | undefined): ReasoningInfo => ({
   signature: signature ?? null
 })
 
-// =============================================================================
-// Guardrails
-// =============================================================================
-
 /**
  * A guardrail to apply to every request, set as `Config.guardrailConfig`.
  *
@@ -542,15 +538,6 @@ export type GuardContent = true | {
   readonly qualifiers: ReadonlyArray<GuardContentQualifier>
 }
 
-/**
- * The provider options of the prompt content a guardrail can evaluate as
- * text.
- *
- * **Details**
- *
- * Text parts and system messages share this interface, because two base
- * interfaces of one augmentation cannot both declare `amazonBedrock`.
- */
 interface GuardableOptions {
   readonly amazonBedrock?: {
     /**
@@ -587,10 +574,6 @@ declare module "effect/ai/Prompt" {
   export interface TextPartOptions extends GuardableOptions {}
 }
 
-/**
- * Builds the block for a text part or a system message: plain text, or
- * guarded text when the options ask for it.
- */
 const textBlock = (
   text: string,
   options: GuardableOptions
@@ -954,11 +937,6 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
   })
 })
 
-/**
- * Narrows the request that `makeRequest` built to the Converse wire shape, by
- * removing `guardrailConfig.streamProcessingMode`, which only ConverseStream
- * has.
- */
 const toConverseRequest = (
   request: typeof ConverseStreamRequest.Encoded
 ): typeof ConverseRequest.Encoded => {
@@ -1124,21 +1102,11 @@ const documentName = (fileName: string | undefined, position: number): string =>
   return `document ${position}`
 }
 
-/** The Smithy model allows a guarded image only as png or jpeg bytes. */
 const guardedImageFormats: Record<string, typeof GuardrailConverseImageBlock.Encoded["format"]> = {
   "image/jpeg": "jpeg",
   "image/png": "png"
 }
 
-/**
- * Builds the guarded image block of a file part that sets `guardContent`.
- *
- * **Details**
- *
- * Fails with `InvalidUserInputError` for a media type other than `image/png`
- * or `image/jpeg`, `image/*` included, whose real format is unknown, and for
- * an `s3://` source, which a guarded image cannot have.
- */
 const guardedImage: (
   part: Prompt.FilePart
 ) => Effect.Effect<typeof GuardrailConverseImageBlock.Encoded, AiError.AiError> = Effect.fnUntraced(
@@ -1324,9 +1292,6 @@ const prepareMessages: (options: LanguageModel.ProviderOptions) => Effect.Effect
               const isLastPart = k === message.content.length - 1
 
               if (part.type === "text") {
-                // AWS documents guardContent only in user and system content.
-                // Allowing it here later breaks no program, and taking it away
-                // later would.
                 if (!Predicate.isNullish(part.options.amazonBedrock?.guardContent)) {
                   return yield* AiError.make({
                     module: "AmazonBedrockLanguageModel",
