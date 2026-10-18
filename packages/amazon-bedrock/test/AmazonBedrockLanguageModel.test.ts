@@ -500,6 +500,30 @@ describe("AmazonBedrockLanguageModel", () => {
         )
         assert.strictEqual(error.reason._tag, "InvalidRequestError")
         assert.include(error.message, "The provided model identifier is invalid.")
+        assert.notInclude(error.message, "data retention")
+      }))
+
+    it.effect("names the account data retention setting when a model rejects the retention mode", () =>
+      Effect.gen(function*() {
+        const message =
+          "The model returned the following errors: data retention mode 'default' is not available for this model"
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(jsonResponse(request, { message }, 400, { "x-amzn-errortype": "ValidationException" }))
+
+        const error = yield* Effect.flip(
+          LanguageModel.generateText({ prompt: "Hello" }).pipe(
+            Effect.provide(layersFor(handler, "global.anthropic.claude-fable-5-1"))
+          )
+        )
+        assert.strictEqual(error.reason._tag, "InvalidRequestError")
+        assert.strictEqual(
+          error.reason._tag === "InvalidRequestError" ? error.reason.description : undefined,
+          `${message} (POST https://bedrock-runtime.us-east-1.amazonaws.com/model/global.anthropic.claude-fable-5-1/converse)` +
+            " The account's data retention mode in this region does not allow this model." +
+            " Claude Fable 5 and 5.1 need `aws_review`." +
+            " Set the mode with the Bedrock PutAccountDataRetention operation:" +
+            " https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html"
+        )
       }))
 
     // Bedrock answers 403 for four different problems and separates them only in
