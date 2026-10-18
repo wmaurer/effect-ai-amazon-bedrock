@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
 import { Effect, Redacted, Schema, Stream } from "effect"
 import { LanguageModel, type Prompt, type Response } from "effect/ai"
+import { readFileSync } from "node:fs"
 import { liveDisabled, modelLayer } from "./helpers.ts"
 
 const TIMEOUT = 120_000
@@ -9,8 +10,11 @@ const TIMEOUT = 120_000
 const GUARDRAIL_ID = process.env.BEDROCK_GUARDRAIL_ID
 const GUARDRAIL_VERSION = process.env.BEDROCK_GUARDRAIL_VERSION ?? "DRAFT"
 
-const BLOCKED_INPUT = "BLOCKED_INPUT_MESSAGE"
-const BLOCKED_OUTPUT = "BLOCKED_OUTPUT_MESSAGE"
+const guardrail: { readonly blockedInputMessaging: string; readonly blockedOutputsMessaging: string } = JSON.parse(
+  readFileSync(new URL("./guardrail.json", import.meta.url), "utf8")
+)
+const BLOCKED_INPUT = guardrail.blockedInputMessaging
+const BLOCKED_OUTPUT = guardrail.blockedOutputsMessaging
 
 const INPUT_BLOCK_PROMPT = "Tell me about zanzibar zorptangle."
 const OUTPUT_BLOCK_PROMPT = "What is the capital of Australia? Answer with the city only."
