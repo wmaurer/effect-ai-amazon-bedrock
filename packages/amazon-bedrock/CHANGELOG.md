@@ -1,6 +1,6 @@
 # @wmaurer/effect-ai-amazon-bedrock
 
-## Unreleased
+## 0.4.0
 
 Amazon Bedrock guardrails are supported. Every finish part now carries `metadata.amazonBedrock`, also without a guardrail.
 

@@ -1,6 +1,6 @@
 # Amazon Bedrock guardrails (0.4.0)
 
-Status: implemented on the branch `feat/guardrails-0.4.0`, with unit tests against a stubbed `HttpClient`. Plan step 5, the live check, passed on 2026-10-18, and step 6 was not needed. Step 8, the release, has not started. 0.3.0 is on npm, and the data retention hint waits under `## Unreleased` in the CHANGELOG for this release.
+Status: implemented in PR #7, with unit tests against a stubbed `HttpClient`. Plan step 5, the live check, passed on 2026-10-18, and step 6 was not needed. Step 8, the release, is prepared as 0.4.0 together with the data retention hint.
 
 ## Problem
 
