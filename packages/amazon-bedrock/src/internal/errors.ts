@@ -268,6 +268,12 @@ export const mapStatusCodeToReason = ({ errorType, http, message, status }: {
   readonly errorType?: string | undefined
   readonly http: typeof AiError.HttpContext.Type
 }): AiError.AiErrorReason => {
+  // AWS sends this with a 400, but the request is well formed. The account has
+  // used up a quota, which a short retry delay will not restore.
+  if (errorType === "ServiceQuotaExceededException") {
+    return new AiError.QuotaExhaustedError({ http })
+  }
+
   const invalidRequestDescription = buildInvalidRequestDescription({
     status,
     message,
