@@ -64,6 +64,28 @@ describe.skipIf(liveDisabled)("Amazon Bedrock content blocks (live)", { concurre
       assert.include(response.text.toLowerCase(), "red")
     }).pipe(Effect.provide(modelLayer())), TIMEOUT)
 
+  it.effect("sends an image given as a data url that the model can actually read", () =>
+    Effect.gen(function*() {
+      const response = yield* LanguageModel.generateText({
+        prompt: Prompt.fromMessages([
+          Prompt.makeMessage("user", {
+            content: [
+              Prompt.makePart("file", {
+                mediaType: "image/png",
+                fileName: "swatch.png",
+                data: `data:image/png;base64,${RED_PNG_BASE64}`
+              }),
+              Prompt.makePart("text", {
+                text: "What single colour fills this image? Reply with one word."
+              })
+            ]
+          })
+        ])
+      })
+
+      assert.include(response.text.toLowerCase(), "red")
+    }).pipe(Effect.provide(modelLayer())), TIMEOUT)
+
   it.effect("sends a document block and reads an invented fact back out of it", () =>
     Effect.gen(function*() {
       const response = yield* LanguageModel.generateText({

@@ -51,7 +51,7 @@ The suites stay in this repository. An upstream pull request to Effect leaves th
 
    ```text
    Test Files  8 passed (8)
-        Tests  41 passed (41)
+        Tests  42 passed (42)
    ```
 
    The summary counts the guardrail suite, which passes only with a guardrail in the account. Without `BEDROCK_GUARDRAIL_ID`, its 12 tests are skipped. See [Run the guardrail suite](#run-the-guardrail-suite).
@@ -128,7 +128,7 @@ Word filters and regex filters cost nothing to evaluate, and the [Amazon Bedrock
 - Tests fail with `AuthenticationError` of kind `InsufficientPermissions` and `x-amzn-errortype` `AccessDeniedException`. The IAM policy or the account's model access does not cover a model or a region that the run uses.
 - Some tests fail with `RateLimitError`. If you ran vitest yourself, add `--no-file-parallelism`. Otherwise wait a minute and run again.
 
-## A full run makes about 38 Bedrock calls
+## A full run makes about 39 Bedrock calls
 
 AWS rejects every call of the errors suite before it reaches a model, so those calls cost nothing. The other prompts are short. Two groups of tests cost more:
 
@@ -154,7 +154,7 @@ The "Models from other providers" section of `docs/TODO.md` records what the pro
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AmazonBedrock.integration.test.ts`            | `generateText`, `generateObject` on the native and the object-tool paths, the `max_tokens` stop reason, cache checkpoints at both TTLs, the usage arithmetic                                               |
 | `AmazonBedrockStream.integration.test.ts`      | Text deltas over several event-stream frames, the `gen_ai.*` attributes of the `streamText` span, and a tool call whose input JSON is split across frames                                                  |
-| `AmazonBedrockContent.integration.test.ts`     | Image blocks, document blocks, and citations                                                                                                                                                               |
+| `AmazonBedrockContent.integration.test.ts`     | Image blocks, given as base64 and as a `data:` url, document blocks, and citations                                                                                                                         |
 | `AmazonBedrockErrors.integration.test.ts`      | The `x-amzn-errortype` values behind `AuthenticationError.kind`, and signing with no session token                                                                                                         |
 | `AmazonBedrockTools.integration.test.ts`       | A `toolResult` sent back against its `toolUse`, `generateObject` with tool history in the prompt, and tool params that the codec rewrote                                                                   |
 | `AmazonBedrockCredentials.integration.test.ts` | A function and an `Effect` credential provider, a refetch with `forceRefresh` after AWS rejects the provider's credentials, and a short-term Bedrock API key, accepted and tampered                        |
