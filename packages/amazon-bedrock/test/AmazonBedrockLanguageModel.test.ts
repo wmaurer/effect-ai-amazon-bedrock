@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { AmazonBedrockClient, AmazonBedrockLanguageModel } from "@wmaurer/effect-ai-amazon-bedrock"
-import { Effect, Layer, Redacted, Schema, Stream } from "effect"
+import { Effect, Layer, Redacted, Schema, Stream, Tracer } from "effect"
 import { type AiError, LanguageModel, Prompt, Tool, Toolkit } from "effect/ai"
 import { HttpClient, type HttpClientError, type HttpClientRequest, HttpClientResponse } from "effect/http"
 import { concat, eventFrame, exceptionFrame, happyPathFrames, inputBlockedTrace, outputMaskedTrace } from "./utils.ts"
@@ -2964,6 +2964,137 @@ describe("AmazonBedrockLanguageModel", () => {
           description: "Unsupported guardContent on an assistant text part - this provider guards only user " +
             "text parts, user png and jpeg images, and system messages"
         })
+      }))
+  })
+
+  describe("telemetry", () => {
+    const inferenceConfig = { maxTokens: 512, temperature: 0.2, topP: 0.9, stopSequences: ["END"] }
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 135,
+      cacheReadInputTokens: 100,
+      cacheWriteInputTokens: 20
+    }
+
+    const genAIAttributes = <A, E>(effect: Effect.Effect<A, E>, spanName: string) =>
+      Effect.gen(function*() {
+        const spans: Array<Tracer.NativeSpan> = []
+        const tracer = Tracer.make({
+          span: (options) => {
+            const span = new Tracer.NativeSpan(options)
+            spans.push(span)
+            return span
+          }
+        })
+        const result = yield* Effect.withTracer(effect, tracer)
+        const span = spans.find((span) => span.name === spanName)
+        assert.isDefined(span)
+        const attributes = Object.fromEntries(
+          globalThis.Array.from(span?.attributes ?? []).filter(([key]) => key.startsWith("gen_ai."))
+        )
+        return { result, attributes }
+      })
+
+    it.effect("annotates the generateText span with the request, the stop reason, and the usage", () =>
+      Effect.gen(function*() {
+        const { attributes } = yield* genAIAttributes(
+          LanguageModel.generateText({ prompt: "Hello" }).pipe(
+            Effect.provide(layersFor(
+              (request) =>
+                Effect.succeed(jsonResponse(request, {
+                  output: { message: { role: "assistant", content: [{ text: "Hi" }] } },
+                  usage,
+                  stopReason: "end_turn"
+                })),
+              "us.test.model-v1:0",
+              { inferenceConfig }
+            ))
+          ),
+          "LanguageModel.generateText"
+        )
+
+        assert.deepStrictEqual(attributes, {
+          "gen_ai.output.type": "text",
+          "gen_ai.provider.name": "aws.bedrock",
+          "gen_ai.operation.name": "chat",
+          "gen_ai.request.model": "us.test.model-v1:0",
+          "gen_ai.request.max_tokens": 512,
+          "gen_ai.request.temperature": 0.2,
+          "gen_ai.request.top_p": 0.9,
+          "gen_ai.request.stop_sequences": ["END"],
+          "gen_ai.response.model": "us.test.model-v1:0",
+          "gen_ai.response.finish_reasons": ["end_turn"],
+          "gen_ai.usage.input_tokens": 130,
+          "gen_ai.usage.output_tokens": 5,
+          "gen_ai.usage.cache_read.input_tokens": 100,
+          "gen_ai.usage.cache_write.input_tokens": 20
+        })
+      }))
+
+    it.effect("annotates the streamText span from the messageStop and metadata events", () =>
+      Effect.gen(function*() {
+        const frames = [
+          eventFrame("messageStart", { role: "assistant" }),
+          eventFrame("contentBlockDelta", { contentBlockIndex: 0, delta: { text: "Hi" } }),
+          eventFrame("contentBlockStop", { contentBlockIndex: 0 }),
+          eventFrame("messageStop", { stopReason: "max_tokens" }),
+          eventFrame("metadata", { usage, metrics: { latencyMs: 12 } })
+        ]
+        const { attributes } = yield* genAIAttributes(
+          LanguageModel.streamText({ prompt: "Hello" }).pipe(
+            Stream.runDrain,
+            Effect.provide(layersFor(
+              (request) => Effect.succeed(binaryResponse(request, concat(frames))),
+              "us.test.model-v1:0",
+              { inferenceConfig }
+            ))
+          ),
+          "LanguageModel.streamText"
+        )
+
+        assert.deepStrictEqual(attributes, {
+          "gen_ai.output.type": "text",
+          "gen_ai.provider.name": "aws.bedrock",
+          "gen_ai.operation.name": "chat",
+          "gen_ai.request.model": "us.test.model-v1:0",
+          "gen_ai.request.max_tokens": 512,
+          "gen_ai.request.temperature": 0.2,
+          "gen_ai.request.top_p": 0.9,
+          "gen_ai.request.stop_sequences": ["END"],
+          "gen_ai.response.model": "us.test.model-v1:0",
+          "gen_ai.response.finish_reasons": ["max_tokens"],
+          "gen_ai.usage.input_tokens": 130,
+          "gen_ai.usage.output_tokens": 5,
+          "gen_ai.usage.cache_read.input_tokens": 100,
+          "gen_ai.usage.cache_write.input_tokens": 20
+        })
+      }))
+
+    it.effect("annotates the generateObject span when a guardrail blocks the object", () =>
+      Effect.gen(function*() {
+        const { attributes, result: error } = yield* genAIAttributes(
+          LanguageModel.generateObject({ prompt: "zorptangle", schema: Schema.Struct({ ticket: Schema.String }) })
+            .pipe(
+              Effect.provide(layersFor(
+                (request) =>
+                  Effect.succeed(jsonResponse(request, {
+                    output: { message: { role: "assistant", content: [{ text: "BLOCKED_INPUT_MESSAGE" }] } },
+                    usage: { inputTokens: 12, outputTokens: 0, totalTokens: 12 },
+                    stopReason: "guardrail_intervened",
+                    trace: inputBlockedTrace
+                  })),
+                "eu.anthropic.claude-opus-4-8"
+              )),
+              Effect.flip
+            ),
+          "LanguageModel.generateObject"
+        )
+
+        assert.strictEqual(error.reason._tag, "ContentPolicyError")
+        assert.deepStrictEqual(attributes["gen_ai.response.finish_reasons"], ["guardrail_intervened"])
+        assert.strictEqual(attributes["gen_ai.usage.input_tokens"], 12)
+        assert.strictEqual(attributes["gen_ai.usage.output_tokens"], 0)
       }))
   })
 })

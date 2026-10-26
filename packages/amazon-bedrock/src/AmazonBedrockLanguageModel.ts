@@ -36,6 +36,7 @@ import * as LanguageModel from "effect/ai/LanguageModel"
 import * as AiModel from "effect/ai/Model"
 import type * as Prompt from "effect/ai/Prompt"
 import type * as Response from "effect/ai/Response"
+import { addGenAIAnnotations } from "effect/ai/Telemetry"
 import * as Tool from "effect/ai/Tool"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
@@ -48,6 +49,7 @@ import * as Result from "effect/Result"
 import type * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
 import * as Stream from "effect/Stream"
+import type { Span } from "effect/Tracer"
 import type { Mutable, Simplify } from "effect/Types"
 import { AmazonBedrockClient } from "./AmazonBedrockClient.ts"
 import type {
@@ -70,6 +72,7 @@ import type {
   Message,
   OutputConfig,
   SystemContentBlock,
+  TokenUsage,
   Tool as BedrockTool,
   ToolChoice,
   ToolConfiguration
@@ -926,13 +929,18 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
     generateText: Effect.fnUntraced(function*(options) {
       const { documents, nameMapper, request: streamRequest } = yield* makeRequest(options)
       const request = toConverseRequest(streamRequest)
+      annotateRequest(options.span, request)
       const rawResponse = yield* client.converse({ payload: request })
+      // Before `makeResponse`, which fails a guardrail-blocked object with a
+      // `ContentPolicyError` after the call has already spent its tokens.
+      annotateResponse(options.span, request.modelId, rawResponse.stopReason, rawResponse.usage)
       return yield* makeResponse(request, rawResponse, options, nameMapper, documents)
     }),
     streamText: Effect.fnUntraced(function*(options) {
       const { documents, nameMapper, request } = yield* makeRequest(options)
+      annotateRequest(options.span, request)
       const stream = client.converseStream({ payload: request })
-      return yield* makeStreamResponse(request, stream, nameMapper, documents)
+      return yield* makeStreamResponse(request, stream, nameMapper, documents, options.span)
     }, (effect, _options) => effect.pipe(Stream.unwrap))
   })
 })
@@ -1734,13 +1742,14 @@ const makeStreamResponse: (
   request: typeof ConverseStreamRequest.Encoded,
   stream: Stream.Stream<ConverseResponseStreamEvent, AiError.AiError>,
   nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>,
-  documents: ReadonlyArray<CitedDocument>
+  documents: ReadonlyArray<CitedDocument>,
+  span: Span
 ) => Effect.Effect<
   Stream.Stream<Response.StreamPartEncoded, AiError.AiError>,
   never,
   IdGenerator.IdGenerator
 > = Effect.fnUntraced(
-  function*(request, stream, nameMapper, documents) {
+  function*(request, stream, nameMapper, documents, span) {
     // Acquired up front: the stream itself must not carry the requirement.
     const idGenerator = yield* IdGenerator.IdGenerator
 
@@ -1965,6 +1974,7 @@ const makeStreamResponse: (
             if (Predicate.isNotUndefined(event.metadata.usage.cacheWriteInputTokens)) {
               usage.cacheWriteInputTokens = event.metadata.usage.cacheWriteInputTokens
             }
+            annotateResponse(span, request.modelId, stopReason, event.metadata.usage)
             // Terminal success event: usage is now populated — emit `finish`.
             parts.push({
               type: "finish",
@@ -2021,6 +2031,41 @@ const makeStreamResponse: (
     )
   }
 )
+
+// =============================================================================
+// Telemetry
+// =============================================================================
+
+const annotateRequest = (span: Span, request: typeof ConverseStreamRequest.Encoded): void => {
+  addGenAIAnnotations(span, {
+    provider: { name: "aws.bedrock" },
+    operation: { name: "chat" },
+    request: {
+      model: request.modelId,
+      maxTokens: request.inferenceConfig?.maxTokens,
+      temperature: request.inferenceConfig?.temperature,
+      topP: request.inferenceConfig?.topP,
+      stopSequences: request.inferenceConfig?.stopSequences
+    }
+  })
+}
+
+const annotateResponse = (span: Span, modelId: string, stopReason: string | null, usage: TokenUsage): void => {
+  const cacheRead = usage.cacheReadInputTokens ?? 0
+  const cacheWrite = usage.cacheWriteInputTokens ?? 0
+  addGenAIAnnotations(span, {
+    response: {
+      model: modelId,
+      finishReasons: stopReason === null ? undefined : [stopReason]
+    },
+    usage: {
+      inputTokens: usage.inputTokens + cacheRead + cacheWrite,
+      outputTokens: usage.outputTokens
+    }
+  })
+  span.attribute("gen_ai.usage.cache_read.input_tokens", cacheRead)
+  span.attribute("gen_ai.usage.cache_write.input_tokens", cacheWrite)
+}
 
 // =============================================================================
 // Utilities
