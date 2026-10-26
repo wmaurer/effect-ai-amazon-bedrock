@@ -145,3 +145,16 @@ Publish with `pnpm`, never with `npm publish`. `pnpm publish` replaces `exports`
 `pnpm publish` stops with `ERR_PNPM_GIT_UNCLEAN` if the checkout has a changed or untracked file. It stops with `ERR_PNPM_GIT_NOT_LATEST` if the upstream of `main`, `origin/main`, has a commit that `main` does not have. It does not stop when `main` is only ahead of `origin/main`. `pnpm publish` compares `main` with the `origin/main` ref that the last `git fetch` wrote, and it does not fetch. Without the `git fetch origin`, it misses commits that reached `origin` since the last fetch. If `main` has no upstream, it never stops with `ERR_PNPM_GIT_NOT_LATEST`. Step 5 pushes `main` so that the published version is a commit on GitHub, where the package's `repository` and `homepage` links point.
 
 The `prepublishOnly` script deletes `dist/` and `tsconfig.tsbuildinfo`, then runs `pnpm build`. `pnpm build` alone is incremental. It leaves the output of a deleted module in `dist/`, where the `./*` export would publish it, and it does not emit again a `dist/` file that someone deleted. The package sets no `publishConfig.provenance`, because a publish from a local machine has no OIDC identity to sign the provenance with.
+
+After the publish, tag the published commit and make a GitHub release whose notes are the version's `CHANGELOG.md` entry. Do it before the next commit on `main`. The published version on npm records no `gitHead`, so `HEAD` at the time of the publish is the only record of which commit the tarball came from. Run these commands from the repository root, with `v` set to the published version:
+
+```sh
+v=0.4.1
+git tag -a "v$v" -m "@wmaurer/effect-ai-amazon-bedrock $v"
+git push origin "v$v"
+{ awk -v v="$v" '/^## /{p=($2==v);next} p' packages/amazon-bedrock/CHANGELOG.md | sed '/./,$!d'
+  echo; echo "npm: https://www.npmjs.com/package/@wmaurer/effect-ai-amazon-bedrock/v/$v"; } \
+  | gh release create "v$v" --verify-tag --title "$v" --latest --notes-file -
+```
+
+Tags `v0.1.0` to `v0.4.1` were added after the fact, on the commit whose `src/`, `README.md`, `CHANGELOG.md`, and `LICENSE` match each npm tarball. For 0.1.0 and 0.2.0 that commit comes after the "prepare the release" commit.
