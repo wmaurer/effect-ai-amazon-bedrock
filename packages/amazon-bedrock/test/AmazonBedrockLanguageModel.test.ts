@@ -521,6 +521,31 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.notInclude(error.message, "data retention")
       }))
 
+    it.effect("surfaces the AWS message when the body spells the key Message", () =>
+      Effect.gen(function*() {
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(jsonResponse(request, { Message: "Malformed input request." }, 400))
+
+        const error = yield* Effect.flip(
+          LanguageModel.generateText({ prompt: "Hello" }).pipe(Effect.provide(layersFor(handler)))
+        )
+        assert.strictEqual(error.reason._tag, "InvalidRequestError")
+        assert.include(error.message, "Malformed input request.")
+      }))
+
+    it.effect("shows the status and the raw body when the body is not JSON", () =>
+      Effect.gen(function*() {
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(HttpClientResponse.fromWeb(request, new Response("<html>Bad Request</html>", { status: 400 })))
+
+        const error = yield* Effect.flip(
+          LanguageModel.generateText({ prompt: "Hello" }).pipe(Effect.provide(layersFor(handler)))
+        )
+        assert.strictEqual(error.reason._tag, "InvalidRequestError")
+        assert.include(error.message, "HTTP 400 (POST ")
+        assert.include(error.message, "Response: <html>Bad Request</html>")
+      }))
+
     it.effect("names the account data retention setting when a model rejects the retention mode", () =>
       Effect.gen(function*() {
         const message =
