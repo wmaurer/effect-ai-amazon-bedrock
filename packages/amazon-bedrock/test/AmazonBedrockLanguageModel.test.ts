@@ -3097,4 +3097,104 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(attributes["gen_ai.usage.output_tokens"], 0)
       }))
   })
+
+  describe("tool-call params", () => {
+    const Weather = Tool.make("Weather", {
+      description: "Look up the weather",
+      parameters: Schema.Struct({
+        city: Schema.String,
+        units: Schema.optional(Schema.String),
+        tags: Schema.Record(Schema.String, Schema.Number)
+      }),
+      success: Schema.String
+    })
+    const toolkit = Toolkit.make(Weather)
+    const makeToolkitLayer = (calls: Array<unknown>) =>
+      toolkit.toLayer({
+        Weather: (params) => {
+          calls.push(params)
+          return Effect.succeed("sunny")
+        }
+      })
+
+    // The schema sent to Bedrock makes `units` required and nullable, and
+    // describes `tags` as a list of key-value pairs.
+    const codecParams = { city: "Zurich", units: null, tags: [{ "0": "a", "1": 1 }] }
+
+    const converseHandler = (input: unknown) => (request: HttpClientRequest.HttpClientRequest) =>
+      Effect.succeed(jsonResponse(request, {
+        output: {
+          message: {
+            role: "assistant",
+            content: [{ toolUse: { toolUseId: "tu_1", name: "Weather", input } }]
+          }
+        },
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        stopReason: "tool_use"
+      }))
+
+    const streamHandler = (input: unknown) => (request: HttpClientRequest.HttpClientRequest) =>
+      Effect.succeed(binaryResponse(
+        request,
+        concat([
+          eventFrame("messageStart", { role: "assistant" }),
+          eventFrame("contentBlockStart", {
+            contentBlockIndex: 0,
+            start: { toolUse: { toolUseId: "tu_1", name: "Weather" } }
+          }),
+          eventFrame("contentBlockDelta", {
+            contentBlockIndex: 0,
+            delta: { toolUse: { input: JSON.stringify(input) } }
+          }),
+          eventFrame("contentBlockStop", { contentBlockIndex: 0 }),
+          eventFrame("messageStop", { stopReason: "tool_use" }),
+          eventFrame("metadata", { usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } })
+        ])
+      ))
+
+    it.effect("generateText decodes params that follow the sent schema", () =>
+      Effect.gen(function*() {
+        const calls: Array<unknown> = []
+        const response = yield* LanguageModel.generateText({ prompt: "weather?", toolkit }).pipe(
+          Effect.provide(layersFor(converseHandler(codecParams))),
+          Effect.provide(makeToolkitLayer(calls))
+        )
+
+        assert.deepStrictEqual(calls, [{ city: "Zurich", tags: { a: 1 } }])
+        const toolCall = response.content.find((part) => part.type === "tool-call")
+        assert.deepStrictEqual(toolCall?.params, { city: "Zurich", tags: { a: 1 } })
+      }))
+
+    it.effect("streamText decodes params that follow the sent schema", () =>
+      Effect.gen(function*() {
+        const calls: Array<unknown> = []
+        const parts = yield* LanguageModel.streamText({ prompt: "weather?", toolkit }).pipe(
+          Stream.runCollect,
+          Effect.provide(layersFor(streamHandler(codecParams))),
+          Effect.provide(makeToolkitLayer(calls))
+        )
+
+        assert.deepStrictEqual(calls, [{ city: "Zurich", tags: { a: 1 } }])
+        const toolCall = globalThis.Array.from(parts).find((part) => part.type === "tool-call")
+        assert.deepStrictEqual(toolCall?.params, { city: "Zurich", tags: { a: 1 } })
+      }))
+
+    it.effect("leaves params that fail the sent schema for the Toolkit to reject", () =>
+      Effect.gen(function*() {
+        const calls: Array<unknown> = []
+        const error = yield* Effect.flip(
+          LanguageModel.generateText({ prompt: "weather?", toolkit }).pipe(
+            Effect.provide(layersFor(converseHandler({ city: 1, tags: {} }))),
+            Effect.provide(makeToolkitLayer(calls))
+          )
+        )
+
+        assert.deepStrictEqual(calls, [])
+        assert.strictEqual(error.reason._tag, "ToolParameterValidationError")
+        assert.strictEqual(
+          error.message,
+          "Toolkit.Weather.handle: Invalid parameters for tool 'Weather': Expected string\n  at [\"city\"]"
+        )
+      }))
+  })
 })
