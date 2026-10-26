@@ -797,6 +797,29 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.deepStrictEqual(content, [{ image: { format: "jpeg", source: { bytes: "AQID" } } }])
       }))
 
+    it.effect("sends the base64 payload of a data url without its prefix", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", { mediaType: "image/png", data: "data:image/png;base64,AQID" }),
+          Prompt.makePart("file", { mediaType: "image/png", data: new URL("data:image/png;charset=x;base64,BAUG") })
+        ])
+
+        assert.deepStrictEqual(content, [
+          { image: { format: "png", source: { bytes: "AQID" } } },
+          { image: { format: "png", source: { bytes: "BAUG" } } }
+        ])
+      }))
+
+    it.effect("fails on a data url that is not base64", () =>
+      Effect.gen(function*() {
+        const error = yield* Effect.flip(
+          captureUserContent([Prompt.makePart("file", { mediaType: "text/plain", data: "data:text/plain,hello" })])
+        )
+
+        assert.strictEqual((error as any).reason._tag, "InvalidUserInputError")
+        assert.include((error as any).message, "data:text/plain,")
+      }))
+
     it.effect("maps the image/* media type to jpeg", () =>
       Effect.gen(function*() {
         const content = yield* captureUserContent([
@@ -857,6 +880,20 @@ describe("AmazonBedrockLanguageModel", () => {
             citations: { enabled: true }
           }
         }])
+      }))
+
+    it.effect("decodes the base64 payload of a data url for a cited text document", () =>
+      Effect.gen(function*() {
+        const content = yield* captureUserContent([
+          Prompt.makePart("file", {
+            mediaType: "text/plain",
+            fileName: "notes.txt",
+            data: "data:text/plain;base64,aGVsbG8gd29ybGQ=",
+            options: { amazonBedrock: { citations: { enabled: true } } }
+          })
+        ])
+
+        assert.deepStrictEqual(content[0].document.source, { text: "hello world" })
       }))
 
     it.effect("decodes Uint8Array data for a cited text document as utf-8", () =>
