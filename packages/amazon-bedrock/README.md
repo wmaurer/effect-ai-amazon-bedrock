@@ -10,7 +10,7 @@ The package supports text generation, streaming, tool calls, structured output, 
 pnpm add @wmaurer/effect-ai-amazon-bedrock effect
 ```
 
-The package declares `effect` `^4.0.5` as a peer dependency. Its tests run on `effect` 4.0.5.
+The package declares `effect` `^4.0.6` as a peer dependency. Its tests run on `effect` 4.0.6.
 
 Set these options in your `tsconfig.json`:
 

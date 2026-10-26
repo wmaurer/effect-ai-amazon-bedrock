@@ -1,5 +1,10 @@
 # @wmaurer/effect-ai-amazon-bedrock
 
+## Unreleased
+
+- Raise the `effect` peer dependency to `^4.0.6`.
+- Fail with an `AiError` whose reason is `InvalidResponseError` when a Converse response or a ConverseStream event does not match the expected schema, as `@effect/ai-anthropic` and `@effect/ai-openai` do since Effect 4.0.6. The reason was `InvalidOutputError`, which `LanguageModel` retries, and a retry does not fix a response in a format the provider does not expect. `InvalidResponseError` is not retryable. Tool input that the model streams as invalid JSON still fails with `InvalidOutputError`.
+
 ## 0.4.1
 
 Model call spans carry the OpenTelemetry GenAI attributes. Tool-call params, `data:` URL file parts, and two kinds of Bedrock error are fixed.

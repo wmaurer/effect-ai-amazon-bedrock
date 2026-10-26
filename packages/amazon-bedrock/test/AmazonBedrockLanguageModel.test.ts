@@ -508,6 +508,22 @@ describe("AmazonBedrockLanguageModel", () => {
         }
       }))
 
+    it.effect("fails with an InvalidResponseError that is not retried when the response does not decode", () =>
+      Effect.gen(function*() {
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(jsonResponse(request, {
+            output: { message: { role: "assistant", content: [{ text: "Hi" }] } },
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            stopReason: 42
+          }))
+
+        const error = yield* Effect.flip(
+          LanguageModel.generateText({ prompt: "Hello" }).pipe(Effect.provide(layersFor(handler)))
+        )
+        assert.strictEqual(error.reason._tag, "InvalidResponseError")
+        assert.isFalse(error.isRetryable)
+      }))
+
     it.effect("maps 400 to InvalidRequestError and surfaces the AWS message", () =>
       Effect.gen(function*() {
         const handler = (request: HttpClientRequest.HttpClientRequest) =>
@@ -2177,6 +2193,16 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.deepStrictEqual((delta as any).metadata, {
           amazonBedrock: { info: { type: "redactedContent", redactedContent: "cmVkYWN0ZWQ=" } }
         })
+      }))
+
+    it.effect("fails with an InvalidResponseError that is not retried when an event does not decode", () =>
+      Effect.gen(function*() {
+        const error = yield* Effect.flip(streamParts([
+          eventFrame("messageStart", { role: "assistant" }),
+          eventFrame("messageStop", { stopReason: 42 })
+        ]))
+        assert.strictEqual(error.reason._tag, "InvalidResponseError")
+        assert.isFalse(error.isRetryable)
       }))
 
     it.effect("surfaces in-stream exceptions as error parts", () =>

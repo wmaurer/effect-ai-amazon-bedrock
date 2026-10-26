@@ -23,7 +23,7 @@ export const mapSchemaError = dual<
   AiError.make({
     module: "AmazonBedrockClient",
     method,
-    reason: AiError.InvalidOutputError.fromSchemaError(error)
+    reason: AiError.InvalidResponseError.fromSchemaError(error)
   }))
 
 /** @internal */

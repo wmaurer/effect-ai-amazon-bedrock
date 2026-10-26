@@ -26,7 +26,7 @@ consumer=$work/consumer
 mkdir "$consumer"
 cd "$consumer"
 printf '{ "name": "consumer", "private": true, "type": "module" }\n' > package.json
-pnpm add --ignore-workspace "$tarball" effect@4.0.5
+pnpm add --ignore-workspace "$tarball" effect@4.0.6
 
 cat > tsconfig.json <<'EOF'
 {
