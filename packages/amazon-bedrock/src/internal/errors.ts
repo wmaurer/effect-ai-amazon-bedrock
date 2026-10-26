@@ -114,10 +114,10 @@ export const mapCredentialProviderError =
 // with the exception type carried in the `x-amzn-errortype` header — NOT
 // Anthropic's nested `{ error: { type, message } }`. Schema-guarded so a
 // non-conforming body safely yields `undefined`.
-const BedrockErrorBody = Schema.Struct({
+const BedrockErrorBody = Schema.fromJsonString(Schema.Struct({
   message: Schema.optional(Schema.String),
   Message: Schema.optional(Schema.String)
-})
+}))
 
 /** @internal */
 const mapStatusCodeError = Effect.fnUntraced(function*(
@@ -137,16 +137,7 @@ const mapStatusCodeError = Effect.fnUntraced(function*(
 
   // Promote the provider's error message to the structured reason (else 5xx
   // shows "Server error" and 4xx shows a bare "HTTP <status>").
-  let json: unknown = undefined
-  // @effect-diagnostics effect/tryCatchInEffectGen:off
-  if (Predicate.isNotUndefined(body)) {
-    try {
-      json = JSON.parse(body)
-    } catch {
-      json = undefined
-    }
-  }
-  const decoded = Schema.decodeUnknownOption(BedrockErrorBody)(json)
+  const decoded = Schema.decodeUnknownOption(BedrockErrorBody)(body)
   const message = Option.isSome(decoded)
     ? decoded.value.message ?? decoded.value.Message
     : undefined
