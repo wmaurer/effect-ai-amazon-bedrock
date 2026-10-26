@@ -10,7 +10,7 @@ To use the package, read [its README](packages/amazon-bedrock/README.md). It exp
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `packages/amazon-bedrock` | The published package, with its source in `src/`, its unit tests in `test/`, and its changelog                          |
 | `packages/tools/oxc`      | A copy of Effect's private `@effect/oxc` package, which holds Effect's custom oxlint rules                              |
-| `docs/TODO.md`            | The Converse capabilities the provider does not model yet, and what has been checked against real Bedrock               |
+| `docs/TODO.md`            | What has been checked against real Bedrock, the assumptions that have not, and the features left out on purpose         |
 | `docs/design`             | The design records for features                                                                                         |
 | `scripts`                 | `upstream-check.sh`, which checks the package against the Effect fork, and `smoke-consumer.sh`, which tests the tarball |
 
