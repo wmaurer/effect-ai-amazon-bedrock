@@ -471,15 +471,15 @@ The provider adds the `amazonBedrock` key to the option and metadata types of `e
 
 Converse has features that this provider does not model yet:
 
-- `additionalModelResponseFieldPaths` and the `additionalModelResponseFields` it returns.
-- Video blocks. A `video/*` file part fails with `InvalidUserInputError`.
-- Documents given as pre-chunked `content`.
-- The `error` field of an image block.
+- `additionalModelResponseFieldPaths` and the `additionalModelResponseFields` it returns ([#15](https://github.com/wmaurer/effect-ai-amazon-bedrock/issues/15)).
+- Video blocks. A `video/*` file part fails with `InvalidUserInputError` ([#18](https://github.com/wmaurer/effect-ai-amazon-bedrock/issues/18)).
+- Documents given as pre-chunked `content` ([#19](https://github.com/wmaurer/effect-ai-amazon-bedrock/issues/19)).
+- The `error` field of an image block ([#20](https://github.com/wmaurer/effect-ai-amazon-bedrock/issues/20)).
 - The `audio`, `searchResult`, `toolAddition`, and `toolRemoval` content blocks, which the provider decodes and ignores.
 - Citations with a `web` or `searchResultLocation` location, which the provider drops.
 - System tools, which run on Bedrock.
-- The Converse request fields `promptVariables`, `requestMetadata`, `performanceConfig`, and `serviceTier`. The request config has no key for them.
-- The `ApplyGuardrail` operation, which evaluates content without a model call.
+- The Converse request fields `promptVariables`, `requestMetadata`, `performanceConfig`, and `serviceTier`. The request config has no key for them ([#16](https://github.com/wmaurer/effect-ai-amazon-bedrock/issues/16)).
+- The `ApplyGuardrail` operation, which evaluates content without a model call ([#17](https://github.com/wmaurer/effect-ai-amazon-bedrock/issues/17)).
 
 `LanguageModel.streamText` always asks for text, so streamed structured output is not available. That limit is in `effect/ai`, not in this provider.
 
@@ -506,7 +506,7 @@ export const answer = LanguageModel.generateText({
 
 The model may then call a tool instead of answering. If you cannot accept that, rewrite the tool calls and results in the history as text first.
 
-[`docs/TODO.md`](https://github.com/wmaurer/effect-ai-amazon-bedrock/blob/main/docs/TODO.md) explains each gap and what was tested against real Bedrock.
+The [open issues](https://github.com/wmaurer/effect-ai-amazon-bedrock/issues) track each gap. [`docs/TODO.md`](https://github.com/wmaurer/effect-ai-amazon-bedrock/blob/main/docs/TODO.md) records what was tested against real Bedrock and why some features are left out on purpose.
 
 ## Where the package comes from
 

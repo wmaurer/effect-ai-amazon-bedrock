@@ -1,8 +1,9 @@
 # TODO — `@wmaurer/effect-ai-amazon-bedrock`
 
-Extensions deliberately scoped out while implementing streaming tool calls, reasoning,
-images/documents, prompt caching, and citations, and assumptions that no live run has checked.
-Ordered by how likely they are to matter.
+This file records what is known about the provider and Bedrock: findings from probes and live
+runs, assumptions that no live run has checked, and why some Converse features are left out on
+purpose. Work to do, such as a Converse capability that the provider does not model yet, is a
+[GitHub issue](https://github.com/wmaurer/effect-ai-amazon-bedrock/issues), not an entry here.
 
 ## Credentials
 
@@ -77,46 +78,6 @@ The live suites cannot settle this as they stand. `BEDROCK_MODEL_ID` changes the
 cache, citation, and reasoning tests check Claude behaviour and would fail on other models for
 that reason alone. Run `probe-models.ts` for the model instead.
 
-## Embeddings
-
-`effect/ai` defines an `EmbeddingModel` interface, and this package implements only
-`LanguageModel`. The Bedrock embedding models, such as Titan Text Embeddings and Cohere Embed,
-are served by `InvokeModel` with a request body that differs for each model, not by Converse.
-Supporting them means a second request path in `AmazonBedrockClient` and one body codec for each
-model family.
-
-## `additionalModelResponseFieldPaths`
-
-The read side of the Converse feature whose write side is now modelled.
-`additionalModelResponseFieldPaths` asks for model-specific response fields by JSON Pointer
-(`[ "/stop_sequence" ]`), and Converse returns them in `additionalModelResponseFields` — which
-lands in two places the Smithy model shows: on `ConverseResponse` and, for the streaming path,
-on `MessageStopEvent`.
-
-Neither side is modelled. The request half is worthless without the response half, and the
-response half has nowhere to go: it would need a provider-metadata carrier invented for it,
-with no caller waiting. `ConverseResponse` here already omits `trace`, `performanceConfig` and
-`serviceTier` by the same selectivity, so leaving this out is consistent rather than an
-oversight. Model both halves together or neither.
-
-## Other `ConverseRequest` fields
-
-The Smithy model gives Converse and ConverseStream the same 13 request members.
-`ConverseRequest` in `AmazonBedrockSchema.ts` models eight of them: `modelId`, `messages`,
-`system`, `toolConfig`, `inferenceConfig`, `additionalModelRequestFields`, `outputConfig`, and
-`guardrailConfig`. The section above covers `additionalModelResponseFieldPaths`. The other four are
-not modelled: `promptVariables`, `requestMetadata`, `performanceConfig`, and `serviceTier`.
-
-`AmazonBedrockLanguageModel.Config` is the encoded `ConverseStreamRequest` without `messages`,
-`system`, and `outputConfig`, with every field optional, so the request config has no key for these
-four. `ConverseStreamRequest` is `ConverseRequest` with the guardrail config of ConverseStream, which
-adds `streamProcessingMode`.
-It adds its own `outputConfig`, which takes only `effort`, because the provider sets `textFormat`
-for `generateObject`. It also adds `structuredOutputs` and `forcedToolChoice`, which pick how `generateObject`
-asks for the object and are never sent to Bedrock. `make` spreads the config into the request, so a field
-added to `ConverseRequest` reaches Bedrock through `model`, `layer`, and `withConfigOverride` with
-no other change.
-
 ## Guardrails
 
 `guardrailConfig`, the trace on the finish part, and `guardContent` are modelled, and
@@ -124,7 +85,6 @@ no other change.
 `test/live/AmazonBedrockGuardrails.integration.test.ts` ran green on 2026-10-18 against a guardrail of
 word and regex filters in `eu-west-1`. These gaps remain:
 
-- `ApplyGuardrail`, which evaluates content without a model call, is not modelled.
 - The `promptRouter` member of the trace reaches the caller only in the raw `trace`.
 - The type requires `guardrailIdentifier` and `guardrailVersion`, though the Smithy model does not.
   Whether a request can ask for the trace of an account or organization enforced guardrail without
@@ -198,30 +158,7 @@ The provider adds a pointer to that setting to the error. These gaps remain:
 - The hint matches the AWS message text, which AWS can change. A changed message loses the hint,
   and the `InvalidRequestError` still carries the AWS message.
 
-## Video blocks
-
-`VideoBlock` mirrors `ImageBlock` exactly: a format enum (`mkv`, `mov`, `mp4`, `webm`, `flv`,
-`mpeg`, `mpg`, `wmv`, `three_gp`) plus a source that is `bytes` or `s3Location`. The `MediaSource`
-schema, the `fileSource` resolver and the media-type lookup-table pattern all already exist from
-the image/document work, so this is mostly mechanical. Today a `video/*` file part fails with
-`InvalidUserInputError` naming the media type.
-
-## `DocumentSource.content`
-
-`bytes`, `s3Location` and `text` are modelled; `content` is not. It carries a document as a list of
-pre-chunked `{ text }` blocks, and it is what makes chunk-granular citations meaningful:
-`DocumentChunkLocation.start` and `.end` are chunk indices, so a `documentChunk` citation has
-nothing to index into unless the request supplied chunks. `Prompt.FilePart` carries a single `data`
-and cannot express "this document is these five sections", so modelling it means a new
-`amazonBedrock` file-part option carrying document payload rather than configuration — the first
-option in this repo to do so. That is the decision to make before implementing it.
-
-## `ImageBlock.error`
-
-`ErrorBlock` reports that an image could not be processed. Not modelled, so such a response decodes
-as an image block with no usable content rather than surfacing the reason.
-
----
+## Unmodelled by design
 
 Other `ContentBlock` union members remain unmodelled and decode-and-ignore by design: `audio`,
 `searchResult`, `toolAddition`, `toolRemoval`. So are the `web` and
