@@ -18,7 +18,7 @@
     "@babel/core": "8.0.7",
     "@effect/oxc": "workspace:^",
     "@effect/tsgo": "0.53.4",
-    "@effect/vitest": "4.0.5",
+    "@effect/vitest": "4.0.6",
     "@types/node": "^26.6.5",
     "babel-plugin-annotate-pure-calls": "0.5.0",
     "dprint": "0.61.1",

@@ -10,7 +10,7 @@ allowBuilds:
 
 overrides:
   "@oxlint/plugins": 1.87.0
-  effect: 4.0.5
+  effect: 4.0.6
 
 minimumReleaseAgeExclude:
   - '@effect/tsgo-darwin-arm64@0.53.4'
