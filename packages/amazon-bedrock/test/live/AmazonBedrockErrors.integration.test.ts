@@ -38,17 +38,16 @@ const errorTypeOf = (reason: typeof AiError.AuthenticationError.Type): string | 
  * the failure really was an authentication error rather than, say, a validation error that
  * happens also to be a 4xx.
  */
-const authenticationFailure = (
+const authenticationFailure = Effect.fnUntraced(function*(
   layer: ReturnType<typeof brokenCredentialsLayer> | ReturnType<typeof unsignedLayer>
-) =>
-  Effect.gen(function*() {
-    const error = yield* Effect.flip(
-      LanguageModel.generateText({ prompt: "Reply with exactly: ok" }).pipe(Effect.provide(layer))
-    )
-    assert.instanceOf(error, AiError.AiError)
-    assert.strictEqual(error.reason._tag, "AuthenticationError")
-    return error.reason as typeof AiError.AuthenticationError.Type
-  })
+) {
+  const error = yield* Effect.flip(
+    LanguageModel.generateText({ prompt: "Reply with exactly: ok" }).pipe(Effect.provide(layer))
+  )
+  assert.instanceOf(error, AiError.AiError)
+  assert.strictEqual(error.reason._tag, "AuthenticationError")
+  return error.reason as typeof AiError.AuthenticationError.Type
+})
 
 describe.skipIf(liveDisabled)("Amazon Bedrock authentication errors (live)", { concurrent: false }, () => {
   it.effect("classifies an unknown access key id as InvalidKey", () =>

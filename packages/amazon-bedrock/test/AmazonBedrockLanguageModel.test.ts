@@ -60,17 +60,16 @@ const layersFor = (
     Layer.provide(Layer.succeed(HttpClient.HttpClient, makeHttpClient(handler)))
   )
 
-const getRequestBody = (request: HttpClientRequest.HttpClientRequest) =>
-  Effect.gen(function*() {
-    const body = request.body
-    if (body._tag === "Uint8Array") {
-      return JSON.parse(new TextDecoder().decode(body.body))
-    }
-    if (body._tag === "Raw" && typeof body.body === "string") {
-      return JSON.parse(body.body)
-    }
-    return yield* Effect.die(new Error(`Expected Raw or Uint8Array body, got ${body._tag}`))
-  })
+const getRequestBody = Effect.fnUntraced(function*(request: HttpClientRequest.HttpClientRequest) {
+  const body = request.body
+  if (body._tag === "Uint8Array") {
+    return JSON.parse(new TextDecoder().decode(body.body))
+  }
+  if (body._tag === "Raw" && typeof body.body === "string") {
+    return JSON.parse(body.body)
+  }
+  return yield* Effect.die(new Error(`Expected Raw or Uint8Array body, got ${body._tag}`))
+})
 
 describe("AmazonBedrockLanguageModel", () => {
   describe("generateText", () => {
@@ -865,20 +864,19 @@ describe("AmazonBedrockLanguageModel", () => {
         stopReason: "end_turn"
       })
 
-    const captureUserContent = (parts: ReadonlyArray<Prompt.UserMessagePart>) =>
-      Effect.gen(function*() {
-        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
-        const handler = (request: HttpClientRequest.HttpClientRequest) => {
-          captured = request
-          return Effect.succeed(fileResponse(request))
-        }
+    const captureUserContent = Effect.fnUntraced(function*(parts: ReadonlyArray<Prompt.UserMessagePart>) {
+      let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+      const handler = (request: HttpClientRequest.HttpClientRequest) => {
+        captured = request
+        return Effect.succeed(fileResponse(request))
+      }
 
-        const prompt = Prompt.fromMessages([Prompt.makeMessage("user", { content: parts })])
-        yield* LanguageModel.generateText({ prompt }).pipe(Effect.provide(layersFor(handler)))
+      const prompt = Prompt.fromMessages([Prompt.makeMessage("user", { content: parts })])
+      yield* LanguageModel.generateText({ prompt }).pipe(Effect.provide(layersFor(handler)))
 
-        const body = yield* getRequestBody(captured!)
-        return body.messages[0].content
-      })
+      const body = yield* getRequestBody(captured!)
+      return body.messages[0].content
+    })
 
     it.effect("encodes an image file part as an image block", () =>
       Effect.gen(function*() {
@@ -1153,21 +1151,20 @@ describe("AmazonBedrockLanguageModel", () => {
         stopReason: "end_turn"
       })
 
-    const captureBody = (prompt: Prompt.Prompt) =>
-      Effect.gen(function*() {
-        let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
-        const handler = (request: HttpClientRequest.HttpClientRequest) => {
-          captured = request
-          return Effect.succeed(cacheResponse(request))
-        }
+    const captureBody = Effect.fnUntraced(function*(prompt: Prompt.Prompt) {
+      let captured: HttpClientRequest.HttpClientRequest | undefined = undefined
+      const handler = (request: HttpClientRequest.HttpClientRequest) => {
+        captured = request
+        return Effect.succeed(cacheResponse(request))
+      }
 
-        // Converse rejects a prompt with tool calls unless the request offers tools.
-        yield* LanguageModel.generateText({ prompt, toolkit: globToolkit }).pipe(
-          Effect.provide(layersFor(handler)),
-          Effect.provide(globToolkitLayer)
-        )
-        return yield* getRequestBody(captured!)
-      })
+      // Converse rejects a prompt with tool calls unless the request offers tools.
+      yield* LanguageModel.generateText({ prompt, toolkit: globToolkit }).pipe(
+        Effect.provide(layersFor(handler)),
+        Effect.provide(globToolkitLayer)
+      )
+      return yield* getRequestBody(captured!)
+    })
 
     const cachePoint = { amazonBedrock: { cachePoint: { type: "default" } } } as const
 
@@ -1591,31 +1588,30 @@ describe("AmazonBedrockLanguageModel", () => {
         }
       }
 
-      const generate = (
+      const generate = Effect.fnUntraced(function*(
         model: string,
         config: typeof AmazonBedrockLanguageModel.Config.Service = {}
-      ) =>
-        Effect.gen(function*() {
-          const bodies: Array<any> = []
-          const handler = (request: HttpClientRequest.HttpClientRequest) =>
-            Effect.map(getRequestBody(request), (body) => {
-              bodies.push(body)
-              return objectResponse(
-                request,
-                body.toolConfig === undefined
-                  ? [{ text: "{\"ok\":true}" }]
-                  : [{ toolUse: { toolUseId: "tu_1", name: "result", input: { ok: true } } }]
-              )
-            })
-          const result = yield* LanguageModel.generateObject({
-            prompt: "x",
-            objectName: "result",
-            schema: Schema.Struct({ ok: Schema.Boolean })
-          }).pipe(AmazonBedrockLanguageModel.withConfigOverride(config), Effect.provide(layersFor(handler, model)))
-          assert.deepStrictEqual(result.value, { ok: true })
-          const [body] = bodies
-          return { system: body.system, outputConfig: body.outputConfig, toolConfig: body.toolConfig }
-        })
+      ) {
+        const bodies: Array<any> = []
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.map(getRequestBody(request), (body) => {
+            bodies.push(body)
+            return objectResponse(
+              request,
+              body.toolConfig === undefined
+                ? [{ text: "{\"ok\":true}" }]
+                : [{ toolUse: { toolUseId: "tu_1", name: "result", input: { ok: true } } }]
+            )
+          })
+        const result = yield* LanguageModel.generateObject({
+          prompt: "x",
+          objectName: "result",
+          schema: Schema.Struct({ ok: Schema.Boolean })
+        }).pipe(AmazonBedrockLanguageModel.withConfigOverride(config), Effect.provide(layersFor(handler, model)))
+        assert.deepStrictEqual(result.value, { ok: true })
+        const [body] = bodies
+        return { system: body.system, outputConfig: body.outputConfig, toolConfig: body.toolConfig }
+      })
 
       for (
         const { model, path } of [
@@ -2913,21 +2909,20 @@ describe("AmazonBedrockLanguageModel", () => {
   })
 
   describe("guardContent", () => {
-    const sendPrompt = (prompt: Prompt.RawInput) =>
-      Effect.gen(function*() {
-        const captured: Array<HttpClientRequest.HttpClientRequest> = []
-        yield* LanguageModel.generateText({ prompt }).pipe(
-          Effect.provide(layersFor((request) => {
-            captured.push(request)
-            return Effect.succeed(jsonResponse(request, {
-              output: { message: { role: "assistant", content: [{ text: "done" }] } },
-              usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-              stopReason: "end_turn"
-            }))
+    const sendPrompt = Effect.fnUntraced(function*(prompt: Prompt.RawInput) {
+      const captured: Array<HttpClientRequest.HttpClientRequest> = []
+      yield* LanguageModel.generateText({ prompt }).pipe(
+        Effect.provide(layersFor((request) => {
+          captured.push(request)
+          return Effect.succeed(jsonResponse(request, {
+            output: { message: { role: "assistant", content: [{ text: "done" }] } },
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            stopReason: "end_turn"
           }))
-        )
-        return yield* getRequestBody(captured[0]!)
-      })
+        }))
+      )
+      return yield* getRequestBody(captured[0]!)
+    })
 
     const rejection = (prompt: Prompt.RawInput) =>
       LanguageModel.generateText({ prompt }).pipe(
@@ -3129,24 +3124,23 @@ describe("AmazonBedrockLanguageModel", () => {
       cacheWriteInputTokens: 20
     }
 
-    const genAIAttributes = <A, E>(effect: Effect.Effect<A, E>, spanName: string) =>
-      Effect.gen(function*() {
-        const spans: Array<Tracer.NativeSpan> = []
-        const tracer = Tracer.make({
-          span: (options) => {
-            const span = new Tracer.NativeSpan(options)
-            spans.push(span)
-            return span
-          }
-        })
-        const result = yield* Effect.withTracer(effect, tracer)
-        const span = spans.find((span) => span.name === spanName)
-        assert.isDefined(span)
-        const attributes = Object.fromEntries(
-          globalThis.Array.from(span?.attributes ?? []).filter(([key]) => key.startsWith("gen_ai."))
-        )
-        return { result, attributes }
+    const genAIAttributes = Effect.fnUntraced(function*<A, E>(effect: Effect.Effect<A, E>, spanName: string) {
+      const spans: Array<Tracer.NativeSpan> = []
+      const tracer = Tracer.make({
+        span: (options) => {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
+        }
       })
+      const result = yield* Effect.withTracer(effect, tracer)
+      const span = spans.find((span) => span.name === spanName)
+      assert.isDefined(span)
+      const attributes = Object.fromEntries(
+        globalThis.Array.from(span?.attributes ?? []).filter(([key]) => key.startsWith("gen_ai."))
+      )
+      return { result, attributes }
+    })
 
     it.effect("annotates the generateText span with the request, the stop reason, and the usage", () =>
       Effect.gen(function*() {

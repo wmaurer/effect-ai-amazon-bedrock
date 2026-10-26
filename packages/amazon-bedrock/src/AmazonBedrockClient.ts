@@ -283,26 +283,25 @@ const makeUnsafe = <R>(
     const resolveCredentials = (method: string) =>
       Effect.mapError(authenticator.resolve, Errors.mapCredentialProviderError(method))
 
-    const converse: Service["converse"] = ({ payload: { modelId, ...body } }) =>
-      Effect.gen(function*() {
-        const client = yield* withConfigClient()
-        const credentials = yield* resolveCredentials("converse")
-        const request = HttpClientRequest.post(`/model/${modelId}/converse`, {
-          body: HttpBody.jsonUnsafe(body)
-        })
-        return yield* client.execute(request).pipe(
-          Effect.provideService(Authentication.CurrentRequestCredentials, credentials),
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(ConverseResponse)),
-          Effect.catchTags({
-            HttpClientError: (error) =>
-              Errors.mapHttpClientError(error, "converse").pipe(
-                Effect.tapError(Authentication.invalidateIfRejected(authenticator, credentials))
-              ),
-            SchemaError: (error) => Effect.fail(Errors.mapSchemaError(error, "converse"))
-          }),
-          withRedactedHeaders
-        )
+    const converse: Service["converse"] = Effect.fnUntraced(function*({ payload: { modelId, ...body } }) {
+      const client = yield* withConfigClient()
+      const credentials = yield* resolveCredentials("converse")
+      const request = HttpClientRequest.post(`/model/${modelId}/converse`, {
+        body: HttpBody.jsonUnsafe(body)
       })
+      return yield* client.execute(request).pipe(
+        Effect.provideService(Authentication.CurrentRequestCredentials, credentials),
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(ConverseResponse)),
+        Effect.catchTags({
+          HttpClientError: (error) =>
+            Errors.mapHttpClientError(error, "converse").pipe(
+              Effect.tapError(Authentication.invalidateIfRejected(authenticator, credentials))
+            ),
+          SchemaError: (error) => Effect.fail(Errors.mapSchemaError(error, "converse"))
+        }),
+        withRedactedHeaders
+      )
+    })
 
     const converseStream: Service["converseStream"] = ({ payload: { modelId, ...body } }) => {
       const request = HttpClientRequest.post(`/model/${modelId}/converse-stream`, {
