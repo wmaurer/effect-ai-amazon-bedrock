@@ -546,6 +546,53 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.include(error.message, "Response: <html>Bad Request</html>")
       }))
 
+    const errorTypeCases = [
+      {
+        status: 400,
+        errorType: "SerializationException",
+        body: {},
+        tag: "InvalidRequestError",
+        expected: "SerializationException: HTTP 400 (POST "
+      },
+      {
+        status: 424,
+        errorType: "ModelErrorException",
+        body: { message: "The model returned an error." },
+        tag: "InternalProviderError",
+        expected: "ModelErrorException: The model returned an error."
+      },
+      {
+        status: 503,
+        errorType: "ServiceUnavailableException",
+        body: {},
+        tag: "InternalProviderError",
+        expected: "Internal provider error: ServiceUnavailableException"
+      },
+      {
+        status: 409,
+        errorType: "ConflictException",
+        body: { message: "Conflict." },
+        tag: "UnknownError",
+        expected: "ConflictException: Conflict."
+      }
+    ] as const
+
+    for (const testCase of errorTypeCases) {
+      it.effect(`names ${testCase.errorType} in the message of an HTTP ${testCase.status}`, () =>
+        Effect.gen(function*() {
+          const handler = (request: HttpClientRequest.HttpClientRequest) =>
+            Effect.succeed(jsonResponse(request, testCase.body, testCase.status, {
+              "x-amzn-errortype": `${testCase.errorType}:http://internal.amazon.com/coral/com.amazon.coral.service/`
+            }))
+
+          const error = yield* Effect.flip(
+            LanguageModel.generateText({ prompt: "Hello" }).pipe(Effect.provide(layersFor(handler)))
+          )
+          assert.strictEqual(error.reason._tag, testCase.tag)
+          assert.include(error.message, testCase.expected)
+        }))
+    }
+
     it.effect("names the account data retention setting when a model rejects the retention mode", () =>
       Effect.gen(function*() {
         const message =
@@ -561,7 +608,7 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(error.reason._tag, "InvalidRequestError")
         assert.strictEqual(
           error.reason._tag === "InvalidRequestError" ? error.reason.description : undefined,
-          `${message} (POST https://bedrock-runtime.us-east-1.amazonaws.com/model/global.anthropic.claude-fable-5-1/converse)` +
+          `ValidationException: ${message} (POST https://bedrock-runtime.us-east-1.amazonaws.com/model/global.anthropic.claude-fable-5-1/converse)` +
             " The account's data retention mode in this region does not allow this model." +
             " Claude Fable 5 and 5.1 need `aws_review`." +
             " Set the mode with the Bedrock PutAccountDataRetention operation:" +
@@ -621,7 +668,7 @@ describe("AmazonBedrockLanguageModel", () => {
           if (error.reason._tag === "AuthenticationError") {
             assert.strictEqual(error.reason.kind, testCase.kind)
           }
-          assert.include(error.message, testCase.message)
+          assert.include(error.message, `${testCase.errorType}: ${testCase.message}`)
         }))
     }
 
