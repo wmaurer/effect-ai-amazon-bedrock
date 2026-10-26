@@ -491,6 +491,23 @@ describe("AmazonBedrockLanguageModel", () => {
         assert.strictEqual(error.reason._tag, "RateLimitError")
       }))
 
+    it.effect("maps ServiceQuotaExceededException to a QuotaExhaustedError that is not retried", () =>
+      Effect.gen(function*() {
+        const handler = (request: HttpClientRequest.HttpClientRequest) =>
+          Effect.succeed(jsonResponse(request, { message: "Your request exceeds the service quota." }, 400, {
+            "x-amzn-errortype": "ServiceQuotaExceededException:http://internal.amazon.com/coral/com.amazon.bedrock/"
+          }))
+
+        const error = yield* Effect.flip(
+          LanguageModel.generateText({ prompt: "Hello" }).pipe(Effect.provide(layersFor(handler)))
+        )
+        assert.strictEqual(error.reason._tag, "QuotaExhaustedError")
+        assert.isFalse(error.isRetryable)
+        if (error.reason._tag === "QuotaExhaustedError") {
+          assert.include(error.reason.http?.body, "Your request exceeds the service quota.")
+        }
+      }))
+
     it.effect("maps 400 to InvalidRequestError and surfaces the AWS message", () =>
       Effect.gen(function*() {
         const handler = (request: HttpClientRequest.HttpClientRequest) =>
