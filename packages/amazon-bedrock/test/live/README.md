@@ -51,7 +51,7 @@ The suites stay in this repository. An upstream pull request to Effect leaves th
 
    ```text
    Test Files  8 passed (8)
-        Tests  40 passed (40)
+        Tests  41 passed (41)
    ```
 
    The summary counts the guardrail suite, which passes only with a guardrail in the account. Without `BEDROCK_GUARDRAIL_ID`, its 12 tests are skipped. See [Run the guardrail suite](#run-the-guardrail-suite).
@@ -156,7 +156,7 @@ The "Models from other providers" section of `docs/TODO.md` records what the pro
 | `AmazonBedrockStream.integration.test.ts`      | Text deltas over several event-stream frames, the `gen_ai.*` attributes of the `streamText` span, and a tool call whose input JSON is split across frames                                                  |
 | `AmazonBedrockContent.integration.test.ts`     | Image blocks, document blocks, and citations                                                                                                                                                               |
 | `AmazonBedrockErrors.integration.test.ts`      | The `x-amzn-errortype` values behind `AuthenticationError.kind`, and signing with no session token                                                                                                         |
-| `AmazonBedrockTools.integration.test.ts`       | A `toolResult` sent back against its `toolUse`, and `generateObject` with tool history in the prompt                                                                                                       |
+| `AmazonBedrockTools.integration.test.ts`       | A `toolResult` sent back against its `toolUse`, `generateObject` with tool history in the prompt, and tool params that the codec rewrote                                                                   |
 | `AmazonBedrockCredentials.integration.test.ts` | A function and an `Effect` credential provider, a refetch with `forceRefresh` after AWS rejects the provider's credentials, and a short-term Bedrock API key, accepted and tampered                        |
 | `AmazonBedrockReasoning.integration.test.ts`   | Extended thinking through `additionalModelRequestFields`, the signed reasoning block sent back in a later turn, and reasoning deltas over the stream                                                       |
 | `AmazonBedrockGuardrails.integration.test.ts`  | A blocked input, a blocked output, a masked output, both stream processing modes, `guardContent` on parts and the system prompt, `ContentPolicyError` from `generateObject`, and a wrong guardrail version |

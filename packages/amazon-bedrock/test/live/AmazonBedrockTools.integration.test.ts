@@ -106,4 +106,41 @@ describe.skipIf(liveDisabled)("Amazon Bedrock tool results (live)", { concurrent
     }).pipe(
       Effect.provide(modelLayer())
     ), TIMEOUT)
+
+  // Bedrock is sent the codec's schema, in which `units` is required and nullable and `tags` is a
+  // list of key-value pairs. The handler only runs if the provider turns the model's params back
+  // into the tool's own shape.
+  it.effect("hands the tool handler params in the tool's own shape", () =>
+    Effect.gen(function*() {
+      const RecordReading = Tool.make("record_reading", {
+        description: "Record readings for a city",
+        parameters: Schema.Struct({
+          city: Schema.String,
+          units: Schema.optional(Schema.String),
+          tags: Schema.Record(Schema.String, Schema.Number)
+        }),
+        success: Schema.String
+      })
+      const toolkit = Toolkit.make(RecordReading)
+      const calls: Array<typeof RecordReading.parametersSchema.Type> = []
+      const handlers = toolkit.toLayer({
+        record_reading: (params) => {
+          calls.push(params)
+          return Effect.succeed("recorded")
+        }
+      })
+
+      yield* LanguageModel.generateText({
+        prompt: "Call record_reading once for Zurich with the tags population 420000 and altitude 408. " +
+          "Give no units.",
+        toolkit,
+        toolChoice: "required"
+      }).pipe(Effect.provide(handlers))
+
+      assert.strictEqual(calls.length, 1)
+      assert.strictEqual(calls[0]!.city, "Zurich")
+      assert.deepStrictEqual(calls[0]!.tags, { population: 420000, altitude: 408 })
+    }).pipe(
+      Effect.provide(modelLayer())
+    ), TIMEOUT)
 })
