@@ -46,7 +46,7 @@ import { dual } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
-import type * as Schema from "effect/Schema"
+import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
 import * as Stream from "effect/Stream"
 import type { Span } from "effect/Tracer"
@@ -940,7 +940,7 @@ export const make = Effect.fnUntraced(function*({ config: providerConfig, model 
       const { documents, nameMapper, request } = yield* makeRequest(options)
       annotateRequest(options.span, request)
       const stream = client.converseStream({ payload: request })
-      return yield* makeStreamResponse(request, stream, nameMapper, documents, options.span)
+      return yield* makeStreamResponse(request, stream, options.tools, nameMapper, documents, options.span)
     }, (effect, _options) => effect.pipe(Stream.unwrap))
   })
 })
@@ -1391,6 +1391,26 @@ const tryToolJsonSchema = (tool: Tool.Any, method: string) =>
     catch: (error) => unsupportedSchemaError(error, method)
   })
 
+// Bedrock is sent each tool's codec schema, which differs from the tool's own
+// schema wherever the codec rewrites a parameter. Params that follow the codec
+// are re-encoded with the tool's schema for the Toolkit to decode. Any others
+// are left as they are, so that the Toolkit reports the error.
+const decodeToolParams = (
+  tools: ReadonlyArray<Tool.Any>,
+  toolName: string,
+  params: unknown
+): Effect.Effect<unknown> => {
+  const tool = tools.find((tool) => tool.name === toolName)
+  if (Predicate.isUndefined(tool)) {
+    return Effect.succeed(params)
+  }
+  return Effect.try(() => toCodecAnthropic(tool.parametersSchema).codec).pipe(
+    Effect.flatMap((codec) => Schema.decodeUnknownEffect(codec)(params)),
+    Effect.flatMap((decoded) => Schema.encodeUnknownEffect(tool.parametersSchema)(decoded)),
+    Effect.orElseSucceed(() => params)
+  ) as Effect.Effect<unknown>
+}
+
 interface ModelCapabilities {
   readonly supportsStructuredOutput: boolean
   readonly supportsForcedToolChoice: boolean
@@ -1642,11 +1662,12 @@ const makeResponse: (
         }
         continue
       }
+      const name = nameMapper.getCustomName(part.toolUse.name)
       parts.push({
         type: "tool-call",
         id: part.toolUse.toolUseId,
-        name: nameMapper.getCustomName(part.toolUse.name),
-        params: part.toolUse.input,
+        name,
+        params: yield* decodeToolParams(options.tools, name, part.toolUse.input),
         providerExecuted: false
       })
     } else if (Predicate.isNotUndefined(part.reasoningContent)) {
@@ -1741,6 +1762,7 @@ const makeResponse: (
 const makeStreamResponse: (
   request: typeof ConverseStreamRequest.Encoded,
   stream: Stream.Stream<ConverseResponseStreamEvent, AiError.AiError>,
+  tools: ReadonlyArray<Tool.Any>,
   nameMapper: Tool.NameMapper<ReadonlyArray<Tool.Any>>,
   documents: ReadonlyArray<CitedDocument>,
   span: Span
@@ -1749,7 +1771,7 @@ const makeStreamResponse: (
   never,
   IdGenerator.IdGenerator
 > = Effect.fnUntraced(
-  function*(request, stream, nameMapper, documents, span) {
+  function*(request, stream, tools, nameMapper, documents, span) {
     // Acquired up front: the stream itself must not carry the requirement.
     const idGenerator = yield* IdGenerator.IdGenerator
 
@@ -1952,7 +1974,7 @@ const makeStreamResponse: (
                 type: "tool-call",
                 id: block.id,
                 name: block.name,
-                params,
+                params: yield* decodeToolParams(tools, block.name, params),
                 providerExecuted: false
               })
             }
