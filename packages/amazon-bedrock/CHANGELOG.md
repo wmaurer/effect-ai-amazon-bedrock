@@ -1,5 +1,15 @@
 # @wmaurer/effect-ai-amazon-bedrock
 
+## 0.4.1
+
+Model call spans carry the OpenTelemetry GenAI attributes. Tool-call params, `data:` URL file parts, and two kinds of Bedrock error are fixed.
+
+- Add the OpenTelemetry GenAI attributes to the spans that `generateText`, `generateObject`, and `streamText` open, as `@effect/ai-anthropic` does. They name the provider, the model, the `inferenceConfig` values, the Converse stop reason, and the token usage with the cache reads and writes, so tools such as Langfuse show the Bedrock calls. The README section "Trace model calls" lists each attribute.
+- Decode tool-call params with the codec of the tool, as `@effect/ai-anthropic` does. The provider sends the input schema of a tool through `toCodecAnthropic`, and 0.4.0 passed the params of the model on unchanged, so params that followed that schema could fail the tool's own schema. A `Schema.optional` field that the model sent as `null` failed with `ToolParameterValidationError`, and so did a `Schema.Record`, which the codec sends as a list of pairs. Params that the codec rejects reach the toolkit unchanged, and the toolkit reports the error.
+- Accept a `data:` URL with a base64 payload as the data of a file part, for images, documents, and guarded images. 0.4.0 sent the whole URL as base64, and Bedrock rejected the request with a 400. A `data:` URL without `;base64` fails with `InvalidUserInputError`.
+- Fail with an `AiError` whose reason is `QuotaExhaustedError` when Bedrock answers `ServiceQuotaExceededException`. Bedrock sends this exception with the status 400, which gave an `InvalidRequestError` in 0.4.0. Neither reason is retryable. The AWS message, which names the quota, stays in `reason.http.body`.
+- Put the exception name from the `x-amzn-errortype` header at the start of the description of an `InvalidRequestError`, `AuthenticationError`, `InternalProviderError`, or `UnknownError`, as in `SerializationException: HTTP 400 (...) Response: {}`. In 0.4.0 a 4xx with the body `{}` did not say why Bedrock rejected the request. A description that held the AWS message now starts with the exception name, so code that compares a description with the AWS message no longer matches.
+
 ## 0.4.0
 
 Amazon Bedrock guardrails are supported. Every finish part now carries `metadata.amazonBedrock`, also without a guardrail.

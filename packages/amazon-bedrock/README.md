@@ -369,7 +369,7 @@ export const answer = Effect.gen(function*() {
 
 ### Choose what the guardrail evaluates
 
-Without `guardContent`, the guardrail evaluates every message but not the system prompt. Once any part of a request has `guardContent`, the guardrail evaluates only the parts that have it. The model still reads every part. `guardContent` goes on a user text part, a system message, or a user file part with a PNG or JPEG image given as base64 or a `Uint8Array`. Any other part with it fails with `InvalidUserInputError`. On text, `qualifiers` names the role of the text in a contextual grounding check:
+Without `guardContent`, the guardrail evaluates every message but not the system prompt. Once any part of a request has `guardContent`, the guardrail evaluates only the parts that have it. The model still reads every part. `guardContent` goes on a user text part, a system message, or a user file part with a PNG or JPEG image given as base64, as a base64 `data:` URL, or as a `Uint8Array`. Any other part with it fails with `InvalidUserInputError`. On text, `qualifiers` names the role of the text in a contextual grounding check:
 
 ```ts
 import { Prompt } from "effect/ai"
@@ -432,7 +432,7 @@ export const search = Tool.make("search", {
 }).annotate(AmazonBedrockLanguageModel.ToolCachePoint, { type: "default" })
 ```
 
-A `file` part becomes an `image` block or a `document` block. Bedrock accepts JPEG, PNG, GIF, and WebP images, and PDF, CSV, DOC, DOCX, XLS, XLSX, HTML, TXT, and Markdown documents. Give the data as base64, as a `Uint8Array`, or as an `s3://` URL. The provider does not fetch other URLs.
+A `file` part becomes an `image` block or a `document` block. Bedrock accepts JPEG, PNG, GIF, and WebP images, and PDF, CSV, DOC, DOCX, XLS, XLSX, HTML, TXT, and Markdown documents. Give the data as base64, as a `data:` URL with a base64 payload, as a `Uint8Array`, or as an `s3://` URL. The provider does not fetch other URLs.
 
 A document part takes two more options. `citations` lets the model cite the document, and the response then holds `source` parts that point at the cited text. `context` tells the model how to read the document.
 
