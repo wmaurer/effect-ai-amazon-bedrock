@@ -467,6 +467,20 @@ Reasoning parts carry the Bedrock signature in `metadata.amazonBedrock.info`. Be
 
 The provider adds the `amazonBedrock` key to the option and metadata types of `effect/ai` through module augmentation. If Effect ships its own Amazon Bedrock provider that uses the same key, both packages declare the same property. Install only one of them.
 
+## Trace model calls
+
+`LanguageModel.generateText`, `generateObject`, and `streamText` each open a span. The provider adds the OpenTelemetry GenAI attributes to it, as `@effect/ai-anthropic` does. Tools that pick LLM spans by these attributes, such as Langfuse, then show the Bedrock calls.
+
+- `gen_ai.provider.name` is `aws.bedrock`, and `gen_ai.operation.name` is `chat`.
+- `gen_ai.request.model` is the model ID of the request. `gen_ai.request.max_tokens`, `gen_ai.request.temperature`, `gen_ai.request.top_p`, and `gen_ai.request.stop_sequences` come from `inferenceConfig`. The span has only the ones that the request sets.
+- `gen_ai.response.model` is also the model ID of the request, because Converse names no model in its response. Converse returns no response ID, so the span has no `gen_ai.response.id`.
+- `gen_ai.response.finish_reasons` holds the Converse stop reason as Bedrock sent it, such as `end_turn` or `guardrail_intervened`. The finish part maps it, so `end_turn` finishes with `"stop"`.
+- `gen_ai.usage.input_tokens` counts the uncached input tokens, the cache reads, and the cache writes. `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_write.input_tokens` give the two cache counts. Each is 0 when Bedrock reports none. `gen_ai.usage.output_tokens` counts the output tokens.
+
+On `streamText`, the stop reason comes from the `messageStop` event and the usage from the `metadata` event. The span has them once the stream has delivered its finish part. A `generateObject` that a guardrail blocks fails with `ContentPolicyError`, and its span still holds the stop reason and the tokens that the call used.
+
+The spans reach a tracing backend only through a tracer layer, such as `OtlpTracer.layer` from `effect/observability`.
+
 ## Check what the provider does not support
 
 Converse has features that this provider does not model yet:
