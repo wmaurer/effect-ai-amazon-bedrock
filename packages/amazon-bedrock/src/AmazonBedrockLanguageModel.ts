@@ -1026,18 +1026,40 @@ const documentFormats: Record<string, typeof DocumentBlock.Encoded["format"]> = 
 /** Matches any absolute url, so a non-s3 one is rejected instead of being treated as base64 data. */
 const urlPattern = /^[a-z][a-z0-9+.-]*:\/\//i
 
+/** Matches the header of a `data:` url, up to the comma before its payload. */
+const dataUrlPattern = /^data:[^,]*?(;base64)?,/i
+
 /**
  * Resolves file part data into a Converse media source.
  *
  * **Details**
  *
  * String data is already base64 per `Prompt.FilePart`, so it is passed through
- * untouched. The only remote source Converse accepts is an S3 location.
+ * untouched. A `data:` url has no `://`, so it is matched on its own, and only
+ * its base64 payload is sent. The only remote source Converse accepts is an S3
+ * location.
  */
 const fileSource: (
   data: typeof Prompt.FilePart.Type["data"]
 ) => Effect.Effect<typeof MediaSource.Encoded, AiError.AiError> = Effect.fnUntraced(function*(data) {
-  if (data instanceof URL || (typeof data === "string" && urlPattern.test(data))) {
+  if (data instanceof Uint8Array) {
+    return { bytes: Base64.encode(data) }
+  }
+  const string = data instanceof URL ? data.href : data
+  const dataUrl = dataUrlPattern.exec(string)
+  if (dataUrl !== null) {
+    if (Predicate.isUndefined(dataUrl[1])) {
+      return yield* AiError.make({
+        module: "AmazonBedrockLanguageModel",
+        method: "prepareMessages",
+        reason: new AiError.InvalidUserInputError({
+          description: `Unsupported file url '${dataUrl[0]}...' - a data url must have a base64 payload`
+        })
+      })
+    }
+    return { bytes: string.slice(dataUrl[0].length) }
+  }
+  if (data instanceof URL || urlPattern.test(data)) {
     const url = data instanceof URL ? data : new URL(data)
     if (url.protocol !== "s3:") {
       return yield* AiError.make({
@@ -1050,7 +1072,7 @@ const fileSource: (
     }
     return { s3Location: { uri: url.toString() } }
   }
-  return { bytes: typeof data === "string" ? data : Base64.encode(data) }
+  return { bytes: data }
 })
 
 /**
@@ -1079,7 +1101,7 @@ const documentSource: (
     if (data instanceof Uint8Array) {
       return { text: new TextDecoder().decode(data) }
     }
-    const decoded = Base64.decodeString(data as string)
+    const decoded = Base64.decodeString(source.bytes)
     if (Result.isFailure(decoded)) {
       return yield* AiError.make({
         module: "AmazonBedrockLanguageModel",
