@@ -265,6 +265,11 @@ export const mapStatusCodeToReason = ({ errorType, http, message, status }: {
     return new AiError.QuotaExhaustedError({ http })
   }
 
+  // The exception shape is often the only clue to the cause, as when a 400
+  // arrives with the body `{}`.
+  const describe = (text: string | undefined): string | undefined =>
+    Predicate.isUndefined(errorType) ? text : Predicate.isUndefined(text) ? errorType : `${errorType}: ${text}`
+
   const invalidRequestDescription = buildInvalidRequestDescription({
     status,
     message,
@@ -278,7 +283,7 @@ export const mapStatusCodeToReason = ({ errorType, http, message, status }: {
     case 404:
     case 422:
       return new AiError.InvalidRequestError({
-        description: invalidRequestDescription,
+        description: describe(invalidRequestDescription),
         http
       })
     case 401:
@@ -287,19 +292,19 @@ export const mapStatusCodeToReason = ({ errorType, http, message, status }: {
         kind: (Predicate.isNotUndefined(errorType) ? authenticationKinds[errorType] : undefined)
           // No header, or a shape we do not know: fall back to what the status implies.
           ?? (status === 401 ? "InvalidKey" : "InsufficientPermissions"),
-        description: message,
+        description: describe(message),
         http
       })
     case 408:
       // ModelTimeoutException: the request took too long to process.
       return new AiError.InternalProviderError({
-        description: message ?? "Model timeout",
+        description: describe(message) ?? "Model timeout",
         http
       })
     case 424:
       // ModelErrorException: the model returned an error response.
       return new AiError.InternalProviderError({
-        description: message ?? "Model error",
+        description: describe(message) ?? "Model error",
         http
       })
     case 429:
@@ -309,12 +314,12 @@ export const mapStatusCodeToReason = ({ errorType, http, message, status }: {
     default:
       if (status >= 500) {
         return new AiError.InternalProviderError({
-          description: message ?? "Server error",
+          description: describe(message) ?? "Server error",
           http
         })
       }
       return new AiError.UnknownError({
-        description: message,
+        description: describe(message),
         http
       })
   }
