@@ -243,7 +243,7 @@ const extractErrorType = (header: string | undefined): string | undefined =>
  * expired `aws login` credentials are the common case. The exception shape in
  * `x-amzn-errortype` is what actually distinguishes them.
  */
-const authenticationKinds: Record<string, typeof AiError.AuthenticationError.Type["kind"]> = {
+const authenticationKinds: Record<string, AiError.AuthenticationError["kind"]> = {
   AccessDeniedException: "InsufficientPermissions",
   ExpiredTokenException: "ExpiredKey",
   IncompleteSignatureException: "InvalidKey",
