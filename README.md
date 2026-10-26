@@ -34,7 +34,7 @@ The install also runs `effect-tsgo patch`, which patches the installed TypeScrip
 | `pnpm test`      | Run the unit tests, which stub the HTTP client and make no network calls   |
 | `pnpm test:live` | Run the checks in `packages/amazon-bedrock/test/live` against real Bedrock |
 
-`pnpm check` exits 0 even when it prints an Effect diagnostic, so read its output as well as its exit code. A change is ready when it prints none.
+`pnpm check` fails on an Effect diagnostic of severity error but exits 0 when it prints only an Effect warning, so read its output as well as its exit code. A change is ready when it prints none.
 
 The live checks cost money and need AWS credentials. They run only when `EFFECT_INTEGRATION_TESTS=1` is set, which `pnpm test:live` does. [`test/live/README.md`](packages/amazon-bedrock/test/live/README.md) names the credentials and permissions they need and how to choose the region and the model.
 

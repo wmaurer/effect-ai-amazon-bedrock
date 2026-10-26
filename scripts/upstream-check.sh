@@ -23,7 +23,7 @@ mkdir -p "$logs"
 summary="$logs/upstream-summary.log"
 : >"$summary"
 fork=${FORK_REPO:?set FORK_REPO to a git checkout of effect-ts/effect}
-ref=${FORK_REF:-32f48b948d}
+ref=${FORK_REF:-a71a775544}
 since=${UPSTREAM_SINCE:-4.0.0}
 wt="$logs/fork-wt"
 pkg=packages/ai/amazon-bedrock
@@ -62,7 +62,7 @@ vitest_ci() {
   EFFECT_INTEGRATION_TESTS=1 pnpm exec vitest run --project @effect/ai-amazon-bedrock --max-concurrency=10
 }
 
-# The fork's tsconfig.base.json keeps Effect diagnostics out of tsc's exit code, so any diagnostic line fails the step.
+# The fork's tsconfig.base.json keeps Effect warnings out of tsc's exit code, so any diagnostic line fails the step.
 tsc_clean() {
   local out code
   out=$("$@" 2>&1)
