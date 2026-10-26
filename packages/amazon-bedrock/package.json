@@ -4,7 +4,7 @@
   "type": "module",
   "license": "MIT",
   "author": "Wayne Maurer",
-  "description": "An Amazon Bedrock provider for the Effect AI modules",
+  "description": "An Amazon Bedrock provider for Effect AI, built on the Converse and ConverseStream APIs",
   "homepage": "https://github.com/wmaurer/effect-ai-amazon-bedrock/tree/main/packages/amazon-bedrock#readme",
   "repository": {
     "type": "git",
